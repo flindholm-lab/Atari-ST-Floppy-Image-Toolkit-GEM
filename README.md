@@ -48,6 +48,24 @@ The toolkit is modeled as standard floating, resizable, and draggable GEM window
 
 ---
 
+## 💾 Supported File Types & Formats
+
+This toolkit features built-in encoders, decoders, and parsers for a wide variety of retro 16-bit Atari formats:
+
+| Category | Extensions | Format / System Name | Details & Capabilities in Toolkit |
+| :--- | :--- | :--- | :--- |
+| **Floppy Disk Images** | `.st` | Standard Atari Disk Image | Raw sector-by-sector floppy dump with classic FAT12 filesystem. Mounts folder-structures, permits read/write injection. |
+| | `.msa` | Magic Shadow Archiver | Compressed Atari floppy image. Read directly via built-in sub-sector decompression engine. |
+| | `.zip` | Zip Compressed Archive | Explored or packaged using integrated browser-side decompression pipelines. |
+| **Executable Packers** | `.prg`, `.tos` | Rob Northen Copier (RNC 1/2) | Auto-detects RNC signatures. Extracts crunched files back to their original size. |
+| | `.prg` | Pack-Ice | Recognizes signature and successfully depacks retro Atari demoscene/game executables. |
+| **Retro Retro-Graphics** | `.pi1`, `.pc1` | DEGAS & DEGAS Elite | Low-resolution (320x200, 16-color) paint canvas files. Decodes 16-bit planar screens and original color palettes. |
+| | `.neo` | NeoChrome Image | Classic 16-color low-res bitplane images from the early Atari graphics suites. |
+| **Sound & PSG Chips** | `.ym` | YM Chip Music File | Streams raw registers to the Yamaha YM2149 PSG chip visual audio emulator. |
+| **Atari System ROMs** | `.img`, `.rom`, `.bin`| Operating System TOS ROM | Supports 192KB, 256KB, and 512KB binaries. Enables custom splitting (Odd/Even bytes) and merging for physical EPROM burning. |
+
+---
+
 ## 📖 User Manual & How-to Guide
 
 ### Loading and Managing Floppy Images
