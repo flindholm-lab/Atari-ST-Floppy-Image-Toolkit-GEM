@@ -1,0 +1,8 @@
+{
+  "name": "Atari ST Floppy Image Toolkit Emulator Inside GEM",
+  "description": "Retro Atari ST GEM system styled floppy disk manager supporting FAT12 file systems, MSA compression, RNC, and Pack-Ice depackers.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

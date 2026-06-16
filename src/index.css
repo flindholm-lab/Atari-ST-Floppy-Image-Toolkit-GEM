@@ -1,0 +1,173 @@
+@import url('https://fonts.googleapis.com/css2?family=Courier+Prime:ital,wght@0,400;0,700;1,400;1,700&display=swap');
+@import "tailwindcss";
+
+:root {
+  --gem-green-light: #4cd973;
+  --gem-green-dark: #1f9a45;
+  --gem-white: #ffffff;
+  --gem-black: #000000;
+  --gem-gray: #e0e0e0;
+  --gem-silver: #c0c0c0;
+
+  /* Default Size Scaling */
+  --gem-size-tiny: 10px;
+  --gem-size-small: 11px;
+  --gem-size-normal: 12px;
+  --gem-size-medium: 14px;
+  --gem-size-large: 16px;
+}
+
+/* Retro Font Utilities */
+.text-gem-tiny { font-size: var(--gem-size-tiny) !important; }
+.text-gem-small { font-size: var(--gem-size-small) !important; }
+.text-gem-normal { font-size: var(--gem-size-normal) !important; }
+.text-gem-medium { font-size: var(--gem-size-medium) !important; }
+.text-gem-large { font-size: var(--gem-size-large) !important; }
+
+/* 100% Accurate Atari ST Color CRT Dither Pattern */
+body {
+  background-color: var(--gem-green-dark);
+  background-image: repeating-conic-gradient(var(--gem-green-dark) 0% 25%, var(--gem-green-light) 0% 50%);
+  background-size: 2px 2px;
+  color: var(--gem-black);
+  font-family: 'Courier Prime', 'Courier New', Courier, monospace;
+  image-rendering: pixelated;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  user-select: none;
+  overflow: hidden;
+  height: 100vh;
+  width: 100vw;
+}
+
+.gem-hatch {
+  background: repeating-linear-gradient(
+    0deg,
+    var(--gem-black),
+    var(--gem-black) 2px,
+    var(--gem-white) 2px,
+    var(--gem-white) 4px
+  );
+}
+
+/* Standard scrollbar-track dither grid */
+.gem-dither-track {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='4' height='4' viewBox='0 0 4 4'><rect width='2' height='2' fill='%23000000'/><rect x='2' y='2' width='2' height='2' fill='%23000000'/></svg>");
+  background-color: var(--gem-white);
+  background-size: 2px 2px;
+}
+
+/* GEM Window Outlines and Shadows */
+.gem-window {
+  border: 2px solid var(--gem-black);
+  box-shadow: 4px 4px 0px var(--gem-black);
+  background-color: var(--gem-white);
+}
+
+/* Classic Atari Double Border Dialog Box */
+.gem-double-border {
+  border: 1px solid var(--gem-black);
+  outline: 2px solid var(--gem-white);
+  box-shadow: 0 0 0 3px var(--gem-black);
+}
+
+/* High contrast inverse selection style */
+.gem-selected {
+  background-color: var(--gem-black) !important;
+  color: var(--gem-white) !important;
+}
+.gem-selected svg, .gem-selected i {
+  filter: invert(1) !important;
+}
+
+.gem-btn {
+  border: 2px solid var(--gem-black);
+  background-color: var(--gem-white);
+  color: var(--gem-black);
+  font-weight: bold;
+  padding: 2px 12px;
+  text-align: center;
+  box-shadow: 2px 2px 0px var(--gem-black);
+  transition: all 0.05s;
+}
+.gem-btn:active {
+  box-shadow: 0px 0px 0px var(--gem-black);
+  transform: translate(2px, 2px);
+  background-color: var(--gem-black);
+  color: var(--gem-white);
+}
+
+/* Dropdown list in workspace menu bar */
+.dropdown:hover .dropdown-content {
+  display: block;
+}
+
+.dropdown-content {
+  display: none;
+  position: absolute;
+  background-color: var(--gem-white);
+  min-width: 290px;
+  border: 2px solid var(--gem-black);
+  box-shadow: 4px 4px 0px var(--gem-black);
+  z-index: 100;
+}
+
+.menu-label {
+  padding-left: 12px;
+  padding-right: 12px;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  font-weight: bold;
+  transition: background-color 0.05s, color 0.05s;
+}
+.dropdown:hover > .menu-label {
+  background-color: var(--gem-black) !important;
+  color: var(--gem-white) !important;
+}
+
+.dropdown-content button {
+  color: var(--gem-black) !important;
+  background-color: var(--gem-white) !important;
+  transition: background-color 0.05s, color 0.05s;
+  white-space: nowrap;
+}
+.dropdown-content button:hover {
+  color: var(--gem-white) !important;
+  background-color: var(--gem-black) !important;
+}
+
+/* Dragging visual cues / animations */
+@keyframes fadeIn {
+  from { opacity: 0; transform: scale(0.98); }
+  to { opacity: 1; transform: scale(1); }
+}
+.animate-fade-in {
+  animation: fadeIn 0.1s ease-out forwards;
+}
+
+/* Custom scrollbar layout styling */
+.scrollbar-v-track {
+  width: 18px;
+  border-left: 2px solid var(--gem-black);
+}
+.scrollbar-h-track {
+  height: 18px;
+  border-top: 2px solid var(--gem-black);
+}
+.scrollbar-btn {
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--gem-black);
+  background-color: var(--gem-white);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 8px;
+  font-weight: bold;
+}
+.scrollbar-btn:active {
+  background-color: var(--gem-black);
+  color: var(--gem-white);
+}
+
