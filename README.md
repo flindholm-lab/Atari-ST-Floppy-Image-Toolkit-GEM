@@ -22,8 +22,14 @@ The toolkit is modeled as standard floating, resizable, and draggable GEM window
 * **Custom Boot Sectors:** Construct standard, executable, or virus-protected Atari ST floppy boot blocks.
 * **Boot Code Injection:** Inject custom executable routines into the boot sector for custom hardware behavior or nostalgic demos.
 
-### 4. Depacking Engine (MSA, RNC, Pack-Ice)
-* **Automatic Decompression:** Detects historical Atari ST crunchers and packers, including **Rob Northen Copier (RNC 1/2)** and **Pack-Ice**.
+### 4. Depacking Engine (MSA, RNC, Pack-Ice, ICE, Atomik, Automation, JEM, JAK etc.)
+* **Automatic Decompression & Identification:** Detects historical Atari ST crunchers, executable packers, and self-extracting stubs. Supported algorithms include:
+  * **Pack-Ice (ICE! / Ice!):** Legendary demoscene and crack packer.
+  * **Atomik Cruncher (ATM3 / ATM5 / ATOMIC):** High-efficiency classic Atari ST cruncher.
+  * **Automation Packer & Compacter:** Notorious multi-file packer from disk-magazine groups.
+  * **The JAM Packer / JEM:** Popular file packers used on games and intros.
+  * **JAK / Jek Packer / Cynix DPAK:** Retro binary packers used by cracking crews (such as Cynix, JEK, and others).
+  * **Rob Northen Copier (RNC 1/2):** Industry-standard gaming compression routine used by commercial releases.
 * **File Rescue:** Extract crunched executable files `.PRG` back to their uncompressed states.
 
 ### 5. File Viewer & Graphics Decoder
@@ -57,8 +63,12 @@ This toolkit features built-in encoders, decoders, and parsers for a wide variet
 | **Floppy Disk Images** | `.st` | Standard Atari Disk Image | Raw sector-by-sector floppy dump with classic FAT12 filesystem. Mounts folder-structures, permits read/write injection. |
 | | `.msa` | Magic Shadow Archiver | Compressed Atari floppy image. Read directly via built-in sub-sector decompression engine. |
 | | `.zip` | Zip Compressed Archive | Explored or packaged using integrated browser-side decompression pipelines. |
-| **Executable Packers** | `.prg`, `.tos` | Rob Northen Copier (RNC 1/2) | Auto-detects RNC signatures. Extracts crunched files back to their original size. |
-| | `.prg` | Pack-Ice | Recognizes signature and successfully depacks retro Atari demoscene/game executables. |
+| **Executable Packers** | `.prg`, `.tos` | Rob Northen Copier (RNC 1/2) | Auto-detects RNC signatures. Extracts crunched game binaries back to their original size. |
+| | `.prg`, `.tos` | Pack-Ice (ICE! / Ice!) | Full signature detection and decompression for classic ICE! / Ice! demoscene executables. |
+| | `.prg`, `.tos` | Atomik Cruncher (ATM3/ATM5/ATOMIC) | Identifies classic ATM3, ATM5, and ATOMIC crunch flags and self-extracting code runs. |
+| | `.prg`, `.tos` | Automation Compacter | Identifies Automation packer formats and compact/crack loaders from famous compilations. |
+| | `.prg`, `.tos` | The JAM Packer / JEM | Detects the magical JEM or JAM! executable tags and extracts corresponding program files. |
+| | `.prg`, `.tos` | JAK / Jek / Cynix DPAK / Byte Killer | Scans and recognizes customized cracking/intro crew self-extracting stubs and packers. |
 | **Retro Retro-Graphics** | `.pi1`, `.pc1` | DEGAS & DEGAS Elite | Low-resolution (320x200, 16-color) paint canvas files. Decodes 16-bit planar screens and original color palettes. |
 | | `.neo` | NeoChrome Image | Classic 16-color low-res bitplane images from the early Atari graphics suites. |
 | **Sound & PSG Chips** | `.ym` | YM Chip Music File | Streams raw registers to the Yamaha YM2149 PSG chip visual audio emulator. |
