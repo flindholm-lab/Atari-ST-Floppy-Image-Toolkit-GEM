@@ -1,5 +1,5 @@
 # Atari ST Floppy Image Toolkit & GEM Workbench
-
+<img width="1366" height="768" alt="image" src="https://github.com/user-attachments/assets/231e6ea9-fcbb-4999-84aa-c6bc14e722ee" />
 A visually rich, full-featured retro Atari ST Desktop environment running entirely in your browser. This application replicates the classic **Digital Research GEM (Graphical Environment Manager)** interface of the Atari ST, complete with a suite of vintage tools for floppy disk image inspection, binary unpacking, ROM burning preparation, boot sector virus scanning, chip music playback, and a fully interactive Atari ST Emulator!
 
 ---
