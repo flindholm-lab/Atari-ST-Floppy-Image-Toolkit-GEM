@@ -136,4 +136,16 @@ To configure customized server-side proxy environments, create a `.env` file cop
 * `APP_URL`: Hosted URL mapping.
 
 ---
+
+## ⚖️ Open Source Licensing & GPL Compliance
+
+This project is built as a fully open-source and copyleft-compliant desktop toolkit. Due to the integration of retro emulator engines, the repository relies on the following guidelines:
+
+* **Whole Project License:** This collective workspace, including custom GEM desktop wrappers, floppy file managers, and decoding utilities, is officially licensed under the **GNU General Public License, Version 3.0 (GPL-3.0-or-later)**.
+* **EstyJS Emulator Licensing:** The integrated Atari ST browser emulation module (`estyJS` located in `/public/estyjs/`) is a classic Javascript Atari compilation created by Darren Coles and maintained by Kai Eckert, distributed under the **GNU GPL v2.0 or later**.
+* **GPL Copyleft Alignment:** In strict alignment with GNU Copyleft principles (and Section 5 of the GPLv3), all downstream distributions, forks, and compilations of this toolkit automatically maintain full GPL-3.0 visibility and must remain open-source under identical permissions.
+
+For the full warranty-free legal terms, review the local [LICENSE](./LICENSE) file.
+
+---
 *Created as a part of the Google AI Studio Workbench. Enjoy the 16-bit desktop magic!*
