@@ -22,8 +22,9 @@ The toolkit is modeled as standard floating, resizable, and draggable GEM window
 * **Custom Boot Sectors:** Construct standard, executable, or virus-protected Atari ST floppy boot blocks.
 * **Boot Code Injection:** Inject custom executable routines into the boot sector for custom hardware behavior or nostalgic demos.
 
-### 4. Depacking Engine (MSA, RNC, Pack-Ice, ICE, Atomik, Automation, JEM, JAK etc.)
+### 4. Depacking Engine (MSA, RNC, Pack-Ice, ICE, Atomik, Thunder V2, Automation, JEM, JAK etc.)
 * **Automatic Decompression & Identification:** Detects historical Atari ST crunchers, executable packers, and self-extracting stubs. Supported algorithms include:
+  * **Thunder V2:** Extremely fast classic LZ77 decompression routine with optimized literal bitstream blocks.
   * **Pack-Ice (ICE! / Ice!):** Legendary demoscene and crack packer.
   * **Atomik Cruncher (ATM3 / ATM5 / ATOMIC):** High-efficiency classic Atari ST cruncher.
   * **Automation Packer & Compacter:** Notorious multi-file packer from disk-magazine groups.
@@ -65,6 +66,7 @@ This toolkit features built-in encoders, decoders, and parsers for a wide variet
 | | `.zip` | Zip Compressed Archive | Explored or packaged using integrated browser-side decompression pipelines. |
 | **Executable Packers** | `.prg`, `.tos` | Rob Northen Copier (RNC 1/2) | Auto-detects RNC signatures. Extracts crunched game binaries back to their original size. |
 | | `.prg`, `.tos` | Pack-Ice (ICE! / Ice!) | Full signature detection and decompression for classic ICE! / Ice! demoscene executables. |
+| | `.prg`, `.tos` | Thunder V2 | Scans for ATOM magic tags and decodes sliding-window LZ matches fast using a custom bitstream decoder. |
 | | `.prg`, `.tos` | Atomik Cruncher (ATM3/ATM5/ATOMIC) | Identifies classic ATM3, ATM5, and ATOMIC crunch flags and self-extracting code runs. |
 | | `.prg`, `.tos` | Automation Compacter | Identifies Automation packer formats and compact/crack loaders from famous compilations. |
 | | `.prg`, `.tos` | The JAM Packer / JEM | Detects the magical JEM or JAM! executable tags and extracts corresponding program files. |

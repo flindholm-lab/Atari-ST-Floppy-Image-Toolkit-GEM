@@ -59,6 +59,14 @@ function detectPackerSignatureInternal(bytes: Uint8Array): string {
     const magicString = String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3]);
     if (magicString === "ICE!") return "Pack-Ice v2.4 Raw Data";
     if (magicString === "Ice!") return "Pack-Ice v2.1 Raw Data";
+    if (magicString === "ATOM") {
+      const uLen = readUint32BE(bytes, 4);
+      const pEnd = readUint32BE(bytes, 8);
+      if (uLen > 0 && uLen < 16777216 && pEnd <= bytes.length) {
+        return "Thunder V2 Raw Data";
+      }
+      return "Atomik Cruncher Raw Data";
+    }
     if (magicString === "ATM3" || magicString === "ATM5") return "Atomik Cruncher Raw Data";
     if (magicString === "JAM!" || magicString === "JAM ") return "The JAM Packer Raw Data";
     if (magicString === "FIRE") return "Fire-Pack Raw Data";
@@ -85,7 +93,17 @@ function detectPackerSignatureInternal(bytes: Uint8Array): string {
   // C. JPM Thunder Packer / ATOMIC
   if (asciiContext.includes("ATOMIC")) return "JPM Thunder Packer / ATOMIC";
   if (asciiContext.includes("THUNDER")) return "JPM Thunder Packer / ATOMIC";
-  if (asciiContext.includes("ATOM") || asciiContext.includes("ATM5") || asciiContext.includes("ATM3") || asciiContext.includes("Atomik")) return "Atomik Cruncher Executable Packer";
+  if (asciiContext.includes("ATOM") || asciiContext.includes("ATM5") || asciiContext.includes("ATM3") || asciiContext.includes("Atomik")) {
+    const idx = asciiContext.indexOf("ATOM");
+    if (idx >= 0 && idx + 12 <= bytes.length) {
+      const uLen = readUint32BE(bytes, idx + 4);
+      const pEnd = readUint32BE(bytes, idx + 8);
+      if (uLen > 0 && uLen < 16777216 && idx + pEnd <= bytes.length) {
+        return "Thunder V2 Executable Packer";
+      }
+    }
+    return "Atomik Cruncher Executable Packer";
+  }
   if (asciiContext.includes("AUTOMATION PACKER V2.3")) return "Automation 2.3 Packer";
   if (asciiContext.includes("AUTOMATION PACKER") || asciiContext.includes("Automation") || asciiContext.includes("COMPACTER")) return "Automation Compacter";
   if (asciiContext.includes("POMPEY PIRATES") || asciiContext.includes("POMPEY")) return "Pompey Pirates Packer";
@@ -2172,6 +2190,248 @@ export function decompressAtomik(bytes: Uint8Array, offset?: number): Uint8Array
   }
 
   return final_data.subarray(0, final_size);
+}
+
+export function decompressThunderV2(bytes: Uint8Array, offset?: number): Uint8Array | null {
+  if (!bytes || bytes.length < 12) return null;
+
+  let atomOffset = -1;
+  const searchStart = offset !== undefined ? offset : 0;
+  
+  if (offset !== undefined) {
+    if (offset + 12 <= bytes.length &&
+        bytes[offset] === 0x41 && bytes[offset+1] === 0x54 && bytes[offset+2] === 0x4F && bytes[offset+3] === 0x4D) {
+      atomOffset = offset;
+    }
+  } else {
+    const limit = Math.min(bytes.length - 12, 10000);
+    for (let i = 0; i < limit; i++) {
+      if (bytes[i] === 0x41 && bytes[i+1] === 0x54 && bytes[i+2] === 0x4F && bytes[i+3] === 0x4D) {
+        atomOffset = i;
+        break;
+      }
+    }
+  }
+
+  if (atomOffset === -1) return null;
+
+  try {
+    const uncompressedLength = ((bytes[atomOffset + 4] << 24) |
+                                (bytes[atomOffset + 5] << 16) |
+                                (bytes[atomOffset + 6] << 8) |
+                                bytes[atomOffset + 7]) >>> 0;
+
+    if (uncompressedLength <= 0 || uncompressedLength > 16 * 1024 * 1024) {
+      return null;
+    }
+
+    const packedEndOffset = ((bytes[atomOffset + 8] << 24) |
+                            (bytes[atomOffset + 9] << 16) |
+                            (bytes[atomOffset + 10] << 8) |
+                            bytes[atomOffset + 11]) >>> 0;
+
+    const absolutePackedEnd = atomOffset + packedEndOffset;
+    if (absolutePackedEnd > bytes.length) {
+      return null;
+    }
+
+    const absoluteLiteralLenOffset = absolutePackedEnd - 4;
+    const literalLength = ((bytes[absoluteLiteralLenOffset] << 24) |
+                          (bytes[absoluteLiteralLenOffset + 1] << 16) |
+                          (bytes[absoluteLiteralLenOffset + 2] << 8) |
+                          bytes[absoluteLiteralLenOffset + 3]) >>> 0;
+
+    const absoluteLiteralsStart = absoluteLiteralLenOffset - literalLength;
+    const absoluteBitstreamStart = atomOffset + 12;
+
+    if (absoluteLiteralsStart < absoluteBitstreamStart) {
+      return null;
+    }
+
+    let a2 = absoluteBitstreamStart;
+    const a3 = absoluteLiteralsStart;
+    let a0 = absoluteLiteralsStart;
+
+    const dest = new Uint8Array(uncompressedLength + 4096);
+    let a4 = 0;
+    let d7 = 0x8000;
+
+    function u3(): boolean {
+      let carry = (d7 & 0x8000) !== 0;
+      d7 = (d7 << 1) & 0xFFFF;
+      if (d7 === 0) {
+        if (a2 + 1 >= bytes.length) {
+          if (a4 >= uncompressedLength) {
+            return false;
+          }
+          throw new Error("Unexpected end of compressed bitstream");
+        }
+        const word = (bytes[a2] << 8) | bytes[a2 + 1];
+        a2 += 2;
+        carry = (word & 0x8000) !== 0;
+        d7 = ((word << 1) | 1) & 0xFFFF;
+      }
+      return carry;
+    }
+
+    function u14(d1: number): number {
+      let d2 = 0;
+      if (d1 > 0) {
+        for (let i = 0; i < d1; i++) {
+          let carry = (d7 & 0x8000) !== 0;
+          d7 = (d7 << 1) & 0xFFFF;
+          if (d7 === 0) {
+            if (a2 + 1 >= bytes.length) {
+              if (a4 >= uncompressedLength) return 0;
+              throw new Error("Unexpected end of bitstream in literal retrieval");
+            }
+            const word = (bytes[a2] << 8) | bytes[a2 + 1];
+            a2 += 2;
+            carry = (word & 0x8000) !== 0;
+            d7 = ((word << 1) | 1) & 0xFFFF;
+          }
+          d2 = (d2 << 1) | (carry ? 1 : 0);
+        }
+      }
+      return d2;
+    }
+
+    function u4(): number {
+      let d1 = 0;
+      for (let i = 0; i < 4; i++) {
+        let carry = (d7 & 0x8000) !== 0;
+        d7 = (d7 << 1) & 0xFFFF;
+        if (d7 === 0) {
+          if (a2 + 1 >= bytes.length) {
+            if (a4 >= uncompressedLength) return 0;
+            throw new Error("Buffer overflow inside code reading cycle");
+          }
+          const word = (bytes[a2] << 8) | bytes[a2 + 1];
+          a2 += 2;
+          carry = (word & 0x8000) !== 0;
+          d7 = ((word << 1) | 1) & 0xFFFF;
+        }
+        d1 = (d1 << 1) | (carry ? 1 : 0);
+      }
+      let d2 = 0;
+      if (d1 > 0) {
+        d2 = u14(d1);
+      }
+      return d2;
+    }
+
+    function writeByte(b: number) {
+      if (a4 >= dest.length) return;
+      dest[a4++] = b;
+    }
+
+    function copyMatch(offsetVal: number, length: number) {
+      if (offsetVal <= 0) {
+        if (a4 >= uncompressedLength) return;
+        throw new Error(`Invalid match copy window size: ${offsetVal}`);
+      }
+      let match_ptr = a4 - offsetVal;
+      if (match_ptr < 0) {
+        if (a4 >= uncompressedLength) return;
+        throw new Error(`Backward offset ref ${offsetVal} points out of allocated address bounds`);
+      }
+      for (let i = 0; i < length; i++) {
+        if (a4 >= dest.length) break;
+        dest[a4] = dest[match_ptr];
+        a4++;
+        match_ptr++;
+      }
+    }
+
+    while (a2 <= a3) {
+      if (a4 >= uncompressedLength) {
+        break;
+      }
+
+      let d1 = 0;
+      if (!u3()) {
+        if (a0 >= absolutePackedEnd) {
+          if (a4 >= uncompressedLength) break;
+          throw new Error("Literal pointer read overflows file boundary limit");
+        }
+        writeByte(bytes[a0++]);
+      } else {
+        if (!u3()) {
+          d1 = 0;
+          for (let i = 0; i < 3; i++) {
+            d1 = (d1 << 1) | (u3() ? 1 : 0);
+          }
+          if (d1 === 1) {
+            for (let i = 0; i < 10; i++) {
+              if (a0 >= absolutePackedEnd) {
+                if (a4 >= uncompressedLength) break;
+                throw new Error("Unexpected end of literals inside block-copy run");
+              }
+              writeByte(bytes[a0++]);
+            }
+          } else if (d1 === 0) {
+            writeByte(0);
+          } else {
+            const d2 = u14(d1);
+            const d0 = d2;
+            const d2_offset = u4();
+            copyMatch(d2_offset, d0 + 1);
+          }
+        } else {
+          if (!u3()) {
+            d1 = 0;
+            for (let i = 0; i < 4; i++) {
+              d1 = (d1 << 1) | (u3() ? 1 : 0);
+            }
+            if (d1 === 1) {
+              if (a0 - 1 < absoluteLiteralsStart) {
+                if (a4 >= uncompressedLength) break;
+                throw new Error("Backward index mismatch at literal head boundary");
+              }
+              writeByte(bytes[a0 - 1]);
+            } else if (d1 < 1) {
+              const d2 = u4();
+              const d0 = d2;
+              if (d0 === 0) {
+                const d2_first = u4();
+                const d0_new = d2_first;
+                const d2_second = u4();
+                copyMatch(d2_second, d0_new + 1);
+              } else {
+                let repeat_val = 0;
+                if (!u3()) {
+                  if (a0 >= absolutePackedEnd) {
+                    if (a4 >= uncompressedLength) break;
+                    throw new Error("Unexpected end of literals on repeating byte stream");
+                  }
+                  repeat_val = bytes[a0++];
+                }
+                for (let i = 0; i < d0 + 1; i++) {
+                  writeByte(repeat_val);
+                }
+              }
+            } else {
+              const d2 = u14(d1);
+              const d0 = 2;
+              copyMatch(d2, d0 + 1);
+            }
+          } else {
+            const d0 = 1;
+            if (a0 >= absolutePackedEnd) {
+              if (a4 >= uncompressedLength) break;
+              throw new Error("Unexpected end of literals during short match sequence");
+            }
+            const d2 = bytes[a0++];
+            copyMatch(d2, d0 + 1);
+          }
+        }
+      }
+    }
+
+    return dest.subarray(0, uncompressedLength);
+  } catch (err) {
+    return null;
+  }
 }
 
 export function decompressAutomation(packed: Uint8Array, offset?: number): Uint8Array | null {

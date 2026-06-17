@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { detectPackerSignature, findAsciiSignature, decompressPackIce, decompressRNC, decompressRLE, decompressLZ77Backward, decompressAtomik, decompressAutomation, decompressJam, decompressJek } from './diskUtils';
+import { detectPackerSignature, findAsciiSignature, decompressPackIce, decompressRNC, decompressRLE, decompressLZ77Backward, decompressAtomik, decompressThunderV2, decompressAutomation, decompressJam, decompressJek } from './diskUtils';
 import { decodeSpectrumSPC, parseNeoAnimStrips, decodeGemImg } from './expandedGraphicsDecoder';
 
 export const stPixelFont: Record<string, number[]> = {
@@ -290,6 +290,11 @@ function runActiveDepackCycleInternal(bytes: Uint8Array, fileName?: string): { d
   if (jam) {
     const method = packerSignature !== "None" && (packerSignature.includes("JAM") || packerSignature.includes("LSD") || packerSignature.includes("LZH") || packerSignature.includes("LZW")) ? packerSignature : "JAM Pack";
     return { data: jam, method, vramOffset: resolveVRAMOffset(jam) };
+  }
+
+  if (asciiString.includes("ATOM") || packerSignature.includes("Thunder")) {
+    const thun = decompressThunderV2(bytes);
+    if (thun) return { data: thun, method: "Thunder V2", vramOffset: resolveVRAMOffset(thun) };
   }
 
   if (asciiString.includes("ATOM") || asciiString.includes("ATM5") || asciiString.includes("ATM3") || packerSignature.includes("Atomik")) {
