@@ -151,6 +151,12 @@ export default function BootBlockCreatorWindow({
           </div>
         </div>
 
+        {geometry?.isFallback && (
+          <div className="bg-red-50 text-red-900 border-2 border-red-400 p-2 text-gem-small text-center font-bold uppercase animate-pulse">
+            ⚠️ FALLBACK ACTIVE: NON-COMPLIANT OR FAKED DOUBLE-SIDED STORAGE ACTIVE. BOOT-SECTOR WRITE PRESERVES REALIGNED SINGLE-SIDED BPB FLAGS.
+          </div>
+        )}
+
         {/* WORKSPACE PREVIEW */}
         <div className="flex flex-col gap-3">
           <label className="text-gem-small font-bold block uppercase">Select Boot-Sector Template:</label>

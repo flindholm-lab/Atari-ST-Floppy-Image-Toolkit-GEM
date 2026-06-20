@@ -94,6 +94,7 @@ export interface DiskGeometry {
   rootDirSectors: number;
   dataAreaStart: number;
   bytesPerCluster: number;
+  isFallback?: boolean;
 }
 
 export interface FloppyDisk {

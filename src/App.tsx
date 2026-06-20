@@ -28,6 +28,12 @@ import {
   getClusterChain,
   getDiskDirEntries,
   decompressMSA,
+  isGeometryCompliant,
+  discoverDirectoryContent,
+  optimizeDiskImage,
+  scoreDirectoryAtOffset,
+  scoreDirectory,
+  deduceGeometryForRootOffset,
 } from './utils/diskUtils';
 import GEMSkeletalWindow from './components/GEMSkeletalWindow';
 import DiskInfoPanel from './components/DiskInfoPanel';
@@ -814,9 +820,13 @@ export default function App() {
 
   const processRawDiskBytes = (bytes: Uint8Array, fileName: string) => {
     let finalBytes = bytes;
+    let msaSectorsPerTrack: number | undefined = undefined;
+    let msaSides: number | undefined = undefined;
 
     if (finalBytes.length >= 10 && finalBytes[0] === 0x0e && finalBytes[1] === 0x0f) {
       try {
+        msaSectorsPerTrack = (finalBytes[2] << 8) | finalBytes[3];
+        msaSides = ((finalBytes[4] << 8) | finalBytes[5]) + 1;
         // Decompress MSA raw sectors
         finalBytes = decompressMSA(finalBytes);
       } catch (err: any) {
@@ -830,40 +840,69 @@ export default function App() {
       return;
     }
 
-    // Recalculate properties from uploaded boot sector
-    const view = new DataView(finalBytes.buffer);
-    const bytesPerSector = view.getUint16(11, true) || 512;
-    const sectorsPerCluster = view.getUint8(13) || 2;
-    const reservedSectors = view.getUint16(14, true) || 1;
-    const numFats = view.getUint8(16) || 2;
-    const rootDirEntries = view.getUint16(17, true) || 112;
-    const totalSectors = view.getUint16(19, true) || 1440;
-    const sectorsPerFat = view.getUint16(22, true) || 3;
+    // Run custom sliding-window layout correction optimizer
+    const optimization = optimizeDiskImage(finalBytes, msaSectorsPerTrack, msaSides);
+    const wasDeinterleaved = optimization.wasDeinterleaved;
+    finalBytes = optimization.bytes;
 
-    const singleFatSize = sectorsPerFat * bytesPerSector;
-    const fatTableStart = reservedSectors * bytesPerSector;
-    const fatTableSize = numFats * singleFatSize;
-    const rootDirStart = fatTableStart + fatTableSize;
-    const rootDirSectors = Math.floor((rootDirEntries * 32 + (bytesPerSector - 1)) / bytesPerSector);
-    const dataAreaStart = rootDirStart + rootDirSectors * bytesPerSector;
-    const bytesPerCluster = sectorsPerCluster * bytesPerSector;
+    if (wasDeinterleaved) {
+      showToast('⚠️ Faked/misaligned Double-Sided container detected! Extracted core Single-Sided contents.', 'info');
+    }
 
-    const newGeometry = {
-      bytesPerSector,
-      sectorsPerCluster,
-      reservedSectors,
-      numFats,
-      rootDirEntries,
-      totalSectors,
-      sectorsPerFat,
-      singleFatSize,
-      fatTableStart,
-      fatTableSize,
-      rootDirStart,
-      rootDirSectors,
-      dataAreaStart,
-      bytesPerCluster,
-    };
+    // Check and handle geometry compliance with content-based sliding-window fallback
+    let newGeometry;
+    if (!isGeometryCompliant(finalBytes)) {
+      showToast('⚠️ Non-compliant boot sector discovered! Bypassing BPB using sliding-window content scanner.', 'info');
+      const discovery = discoverDirectoryContent(finalBytes);
+      
+      // Sliding-window scoring verification to check if another scanned location contains actual valid directory content
+      const bpbRootDirScore = scoreDirectoryAtOffset(finalBytes, discovery.rootDirStart, discovery.rootDirEntries);
+      const bestScanned = discoverDirectoryContent(finalBytes);
+      const scannedRootDirScore = scoreDirectoryAtOffset(finalBytes, bestScanned.rootDirStart, bestScanned.rootDirEntries);
+
+      let activeRootDirStart = discovery.rootDirStart;
+      let activeRootDirEntries = discovery.rootDirEntries;
+
+      if (scannedRootDirScore > bpbRootDirScore && scannedRootDirScore >= 1) {
+        console.log(`[App.tsx Fallback] Corrected root directory offset from ${discovery.rootDirStart} (Score: ${bpbRootDirScore}) to fallback scan offset ${bestScanned.rootDirStart} (Score: ${scannedRootDirScore}).`);
+        activeRootDirStart = bestScanned.rootDirStart;
+        activeRootDirEntries = bestScanned.rootDirEntries;
+      }
+
+      newGeometry = deduceGeometryForRootOffset(finalBytes, activeRootDirStart, activeRootDirEntries);
+    } else {
+      // Recalculate properties from compliant uploaded boot sector
+      const view = new DataView(finalBytes.buffer);
+      const bytesPerSector = view.getUint16(11, true) || 512;
+      const reservedSectors = view.getUint16(14, true) || 1;
+      const numFats = view.getUint8(16) || 2;
+      const rootDirEntries = view.getUint16(17, true) || 112;
+      const sectorsPerFat = view.getUint16(22, true) || 3;
+
+      const singleFatSize = sectorsPerFat * bytesPerSector;
+      const fatTableStart = reservedSectors * bytesPerSector;
+      const fatTableSize = numFats * singleFatSize;
+      let rootDirStart = fatTableStart + fatTableSize;
+
+      // Sliding-window scoring verification on compliant disks to handle custom structures
+      const bpbRootDirScore = scoreDirectoryAtOffset(finalBytes, rootDirStart, rootDirEntries);
+      const bestScanned = discoverDirectoryContent(finalBytes);
+      const scannedRootDirScore = scoreDirectoryAtOffset(finalBytes, bestScanned.rootDirStart, bestScanned.rootDirEntries);
+
+      let activeRootDirStart = rootDirStart;
+      let activeRootDirEntries = rootDirEntries;
+      let forceFallback = false;
+
+      if (scannedRootDirScore > bpbRootDirScore && scannedRootDirScore >= 1) {
+        console.log(`[App.tsx Compliant] Corrected root directory offset from ${rootDirStart} (Score: ${bpbRootDirScore}) to fallback scan offset ${bestScanned.rootDirStart} (Score: ${scannedRootDirScore}).`);
+        activeRootDirStart = bestScanned.rootDirStart;
+        activeRootDirEntries = bestScanned.rootDirEntries;
+        forceFallback = true;
+      }
+
+      newGeometry = deduceGeometryForRootOffset(finalBytes, activeRootDirStart, activeRootDirEntries);
+      newGeometry.isFallback = wasDeinterleaved || forceFallback;
+    }
 
     const runId = addFloppyToCollection(fileName, finalBytes, newGeometry);
     if (!runId) return;

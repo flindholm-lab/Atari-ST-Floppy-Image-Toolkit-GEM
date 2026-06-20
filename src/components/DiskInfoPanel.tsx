@@ -117,8 +117,10 @@ export default function DiskInfoPanel({
 
     setBootInfo(`CODE FOUND: ${codeFound ? 'YES' : 'NO'}, BOOTABLE: ${isBootable ? 'YES' : 'NO'} (${codeType})`);
 
-    // Calculate free / used
-    const totalC = Math.floor((bytes.length - geometry.dataAreaStart) / geometry.bytesPerCluster);
+    // Calculate free / used using logical sector limits
+    const totalSectorsCount = geometry.totalSectors;
+    const dataSectorsCount = totalSectorsCount - Math.floor(geometry.dataAreaStart / geometry.bytesPerSector);
+    const totalC = Math.max(0, Math.floor(dataSectorsCount / geometry.sectorsPerCluster));
     let freeC = 0;
     for (let c = 2; c <= totalC + 1; c++) {
       if (readFAT12Entry(bytes, c, geometry) === 0x000) {
@@ -131,7 +133,9 @@ export default function DiskInfoPanel({
 
   if (!bytes) return null;
 
-  const totalC = Math.floor((bytes.length - geometry.dataAreaStart) / geometry.bytesPerCluster);
+  const totalSectorsCount = geometry.totalSectors;
+  const dataSectorsCount = totalSectorsCount - Math.floor(geometry.dataAreaStart / geometry.bytesPerSector);
+  const totalC = Math.max(0, Math.floor(dataSectorsCount / geometry.sectorsPerCluster));
   const percent = totalC > 0 ? ((usedClusters / totalC) * 100).toFixed(1) : '0.0';
 
   const handleOemSetClick = () => {
@@ -202,8 +206,16 @@ export default function DiskInfoPanel({
           <div className="col-span-2">
             IMAGE: <span className="font-bold truncate block">{fileName}</span>
           </div>
+          {geometry.isFallback && (
+            <div className="col-span-2 bg-red-100 border border-red-700 text-red-900 px-2 py-1 font-bold text-gem-tiny text-center font-mono my-1 uppercase">
+              [!] FALLBACK ACTIVE: NON-COMPLIANT BPB BYPASSED
+            </div>
+          )}
           <div>
-            SIZE: <span className="font-bold block">{bytes.length.toLocaleString()} B</span>
+            BPB LOGICAL CAP: <span className="font-bold block">{(geometry.totalSectors * geometry.bytesPerSector).toLocaleString()} B</span>
+          </div>
+          <div>
+            PHYSICAL BUFFER: <span className="font-bold block">{bytes.length.toLocaleString()} B</span>
           </div>
           <div>
             SECT/CLUS: <span className="font-bold block">{geometry.sectorsPerCluster}</span>

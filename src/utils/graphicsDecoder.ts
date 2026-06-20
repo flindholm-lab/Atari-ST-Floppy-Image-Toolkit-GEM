@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { detectPackerSignature, findAsciiSignature, decompressPackIce, decompressRNC, decompressRLE, decompressLZ77Backward, decompressAtomik, decompressThunderV2, decompressAutomation, decompressJam, decompressJek } from './diskUtils';
+import { detectPackerSignature, findAsciiSignature, decompressPackIce, decompressRNC, decompressRLE, decompressLZ77Backward, decompressAtomik, decompressThunderV2, decompressThunderV1, decompressAutomation, decompressJam, decompressJek } from './diskUtils';
 import { decodeSpectrumSPC, parseNeoAnimStrips, decodeGemImg } from './expandedGraphicsDecoder';
 
 export const stPixelFont: Record<string, number[]> = {
@@ -234,18 +234,79 @@ export function decompressDegasPC(compressedData: Uint8Array, resolution: number
   return interleaved;
 }
 
-const depackCycleCache = new WeakMap<Uint8Array, { data: Uint8Array; method: string; vramOffset: number } | null>();
+const depackCycleCache = new WeakMap<Uint8Array, Map<string, { data: Uint8Array; method: string; vramOffset: number } | null>>();
 
-export function runActiveDepackCycle(bytes: Uint8Array, fileName?: string): { data: Uint8Array; method: string; vramOffset: number } | null {
+export function runActiveDepackCycle(
+  bytes: Uint8Array,
+  fileName?: string,
+  engineOverride: string = "auto"
+): { data: Uint8Array; method: string; vramOffset: number } | null {
   if (!bytes || bytes.length === 0) return null;
-  const cached = depackCycleCache.get(bytes);
+  
+  let subMap = depackCycleCache.get(bytes);
+  if (!subMap) {
+    subMap = new Map();
+    depackCycleCache.set(bytes, subMap);
+  }
+  
+  const cached = subMap.get(engineOverride);
   if (cached !== undefined) return cached;
-  const result = runActiveDepackCycleInternal(bytes, fileName);
-  depackCycleCache.set(bytes, result);
+  
+  const result = runActiveDepackCycleInternal(bytes, fileName, engineOverride);
+  subMap.set(engineOverride, result);
   return result;
 }
 
-function runActiveDepackCycleInternal(bytes: Uint8Array, fileName?: string): { data: Uint8Array; method: string; vramOffset: number } | null {
+function runActiveDepackCycleInternal(
+  bytes: Uint8Array,
+  fileName?: string,
+  engineOverride: string = "auto"
+): { data: Uint8Array; method: string; vramOffset: number } | null {
+
+  if (engineOverride && engineOverride !== "auto") {
+    if (engineOverride === "ice") {
+      const ice = decompressPackIce(bytes);
+      if (ice) return { data: ice, method: "Pack-Ice (Forced)", vramOffset: resolveVRAMOffset(ice) };
+    }
+    if (engineOverride === "atomik") {
+      const atm = decompressAtomik(bytes);
+      if (atm) return { data: atm, method: "Atomik Cruncher (Forced)", vramOffset: resolveVRAMOffset(atm) };
+    }
+    if (engineOverride === "thunder_v1") {
+      for (const offset of [422, 480, 0]) {
+        try {
+          const thunV1 = decompressThunderV1(bytes, offset);
+          if (thunV1) return { data: thunV1, method: `Thunder V1 (Forced, offset ${offset})`, vramOffset: resolveVRAMOffset(thunV1) };
+        } catch (e) {}
+      }
+    }
+    if (engineOverride === "thunder_v2") {
+      for (const offset of [452, 0]) {
+        try {
+          const thun = decompressThunderV2(bytes, offset);
+          if (thun) return { data: thun, method: `Thunder V2 (Forced, offset ${offset})`, vramOffset: resolveVRAMOffset(thun) };
+        } catch (e) {}
+      }
+    }
+    if (engineOverride === "automation") {
+      const aut = decompressAutomation(bytes);
+      if (aut) return { data: aut, method: "Automation 2.3 (Forced)", vramOffset: resolveVRAMOffset(aut) };
+    }
+    if (engineOverride === "rnc") {
+      const rnc = decompressRNC(bytes);
+      if (rnc) return { data: rnc, method: "RNC (Forced)", vramOffset: resolveVRAMOffset(rnc) };
+    }
+    if (engineOverride === "jek") {
+      const jek = decompressJek(bytes);
+      if (jek) return { data: jek, method: "JEK / Byte Killer (Forced)", vramOffset: resolveVRAMOffset(jek) };
+    }
+    if (engineOverride === "jam") {
+      const jam = decompressJam(bytes);
+      if (jam) return { data: jam, method: "JAM / LSD (Forced)", vramOffset: resolveVRAMOffset(jam) };
+    }
+    return null; // Forced engine failed to decompress
+  }
+
   const packerSignature = detectPackerSignature(bytes);
 
   // If no packer signature was detected, we DO NOT run the automatic depacking trial process
@@ -293,8 +354,32 @@ function runActiveDepackCycleInternal(bytes: Uint8Array, fileName?: string): { d
   }
 
   if (asciiString.includes("ATOM") || packerSignature.includes("Thunder")) {
+    // Determine if there is an exact match offset for the Thunder progfile
+    let exactOffset: number | undefined = undefined;
+    if (bytes.length >= 422 + 4 && bytes[422] === 0x41 && bytes[422+1] === 0x54 && bytes[422+2] === 0x4F && bytes[422+3] === 0x4D) {
+      exactOffset = 422;
+    } else if (bytes.length >= 480 + 4 && bytes[480] === 0x41 && bytes[480+1] === 0x54 && bytes[480+2] === 0x4F && bytes[480+3] === 0x4D) {
+      exactOffset = 480;
+    } else if (bytes.length >= 452 + 4 && bytes[452] === 0x41 && bytes[452+1] === 0x54 && bytes[452+2] === 0x4F && bytes[452+3] === 0x4D) {
+      exactOffset = 452;
+    }
+
+    // Attempt exact offset decompression with higher priority
+    if (exactOffset !== undefined) {
+      if (exactOffset === 452) {
+        const thun = decompressThunderV2(bytes, exactOffset);
+        if (thun) return { data: thun, method: "Thunder V2", vramOffset: resolveVRAMOffset(thun) };
+      } else {
+        const thunV1 = decompressThunderV1(bytes, exactOffset);
+        if (thunV1) return { data: thunV1, method: "Thunder V1", vramOffset: resolveVRAMOffset(thunV1) };
+      }
+    }
+
+    // Fallback if no exact offset or decompress failed above
     const thun = decompressThunderV2(bytes);
     if (thun) return { data: thun, method: "Thunder V2", vramOffset: resolveVRAMOffset(thun) };
+    const thunV1 = decompressThunderV1(bytes);
+    if (thunV1) return { data: thunV1, method: "Thunder V1", vramOffset: resolveVRAMOffset(thunV1) };
   }
 
   if (asciiString.includes("ATOM") || asciiString.includes("ATM5") || asciiString.includes("ATM3") || packerSignature.includes("Atomik")) {

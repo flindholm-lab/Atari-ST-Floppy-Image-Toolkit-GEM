@@ -42,6 +42,7 @@ export default function DepackWindow({
   const [logs, setLogs] = useState<string[]>([]);
   const [depackedResult, setDepackedResult] = useState<{ data: Uint8Array; method: string; vramOffset: number } | null>(null);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
+  const [selectedEngine, setSelectedEngine] = useState<string>('auto');
 
   const bytes = propBytes || localBytes;
   const fileName = propFileName || localFileName;
@@ -78,6 +79,7 @@ export default function DepackWindow({
 
   const initializeFile = (name: string, fileBytes: Uint8Array) => {
     setDepackedResult(null);
+    setSelectedEngine('auto');
     
     // Create direct output filename suggestions, e.g. MYFILE.PRG => MYFILE.DEP
     let outName = 'UNPACKED.BIN';
@@ -154,6 +156,7 @@ export default function DepackWindow({
     setLocalFileName('');
     setDepackedResult(null);
     setOutputFilename('');
+    setSelectedEngine('auto');
     setLogs([
       'SYSTEM - Work memory cleared.',
       'Awaiting input file stream...'
@@ -172,7 +175,7 @@ export default function DepackWindow({
         const packerSig = detectPackerSignature(bytes);
         addLog(`Analyzing file markers against signatures... [Found: "${packerSig}"]`);
         
-        const result = runActiveDepackCycle(bytes, fileName);
+        const result = runActiveDepackCycle(bytes, fileName, selectedEngine);
         
         if (result) {
           setDepackedResult(result);
@@ -374,6 +377,33 @@ export default function DepackWindow({
                 </span>
               </div>
             </div>
+
+            {/* Expert Mode Engine Selection */}
+            {expertMode && !depackedResult && (
+              <div className="bg-amber-50/50 p-2 border border-amber-200 rounded text-gem-tiny flex flex-col gap-1">
+                <span className="text-amber-800 font-extrabold text-[9px] uppercase block">
+                  🛠️ EXPERT MODE: DECOMPRESSOR ENGINE OVERRIDE
+                </span>
+                <div className="flex gap-2 items-center">
+                  <span className="text-gray-500 font-bold text-[10px]">Select Engine:</span>
+                  <select
+                    value={selectedEngine}
+                    onChange={(e) => setSelectedEngine(e.target.value)}
+                    className="bg-white border border-black text-[10px] font-mono font-bold py-0.5 px-1 rounded flex-grow text-amber-950 shadow-inner max-w-[190px]"
+                  >
+                    <option value="auto">AUTO-DETECT (DEFAULT)</option>
+                    <option value="ice">PACK-ICE (.ICE/ICE!)</option>
+                    <option value="atomik">ATOMIK CRUNCHER (.ATM)</option>
+                    <option value="thunder_v1">THUNDER V1 / V1.1 (ATOM)</option>
+                    <option value="thunder_v2">THUNDER V2 (ATOM)</option>
+                    <option value="automation">AUTOMATION 2.3/2.4 (LSD/AUTM)</option>
+                    <option value="rnc">RNC V1/V2 (PROPACK)</option>
+                    <option value="jek">JEK / BYTE KILLER (JEK!)</option>
+                    <option value="jam">JAM / LSD / LZH (LZH!/LZW!)</option>
+                  </select>
+                </div>
+              </div>
+            )}
 
             {/* Actions */}
             <div className="flex gap-2 select-none border-t border-gray-200 pt-2.5 mt-0.5">

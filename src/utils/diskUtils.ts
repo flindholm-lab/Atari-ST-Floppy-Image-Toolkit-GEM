@@ -19,65 +19,410 @@ export function detectPackerSignature(bytes: Uint8Array): string {
 function detectPackerSignatureInternal(bytes: Uint8Array): string {
   if (!bytes || bytes.length < 4) return "None";
 
-  // Cynix DPAK at file start
-  if (bytes[0] === 0x44 && bytes[1] === 0x50 && bytes[2] === 0x41 && bytes[3] === 0x4B) {
-    return "Cynix DPAK Raw Data";
-  }
+  // ----- Helper check functions -----
+  const checkLong = (offset: number, val: number): boolean => {
+    if (offset < 0 || offset + 4 > bytes.length) return false;
+    const num = ((bytes[offset] << 24) | (bytes[offset + 1] << 16) | (bytes[offset + 2] << 8) | bytes[offset + 3]) >>> 0;
+    return num === (val >>> 0);
+  };
 
-  // E. Rob Northen Compression (RNC Method 1 or 2)
-  if (bytes[0] === 0x52 && bytes[1] === 0x4E && bytes[2] === 0x43) {
-    if (bytes[3] === 0x01) return "Rob Northen Compression (Method 1)";
-    if (bytes[3] === 0x02) return "Rob Northen Compression (Method 2)";
-  }
+  const checkWord = (offset: number, val: number): boolean => {
+    if (offset < 0 || offset + 2 > bytes.length) return false;
+    const num = (bytes[offset] << 8) | bytes[offset + 1];
+    return num === val;
+  };
 
-  // D. Pack-Ice (ICE! / Ice!) at file start
-  if (bytes[0] === 0x49 && bytes[1] === 0x43 && bytes[2] === 0x45 && bytes[3] === 0x21) {
-    return "Pack-Ice v2.4 Raw Data";
-  }
-  if (bytes[0] === 0x49 && bytes[1] === 0x63 && bytes[2] === 0x65 && bytes[3] === 0x21) {
-    return "Pack-Ice v2.1 Raw Data";
-  }
-
-  // A. Atari ST Executable Header (BRA $1C)
-  const isExecutableHeader = (bytes[0] === 0x60 && (bytes[1] === 0x1A || bytes[1] === 0x1C || bytes[1] === 0x00));
-
-  // B. The Medway Boys Packer — scan final 1,024 bytes
-  const tailStart = Math.max(0, bytes.length - 1024);
-  let tailAscii = "";
-  for (let i = tailStart; i < bytes.length; i++) {
-    tailAscii += (bytes[i] >= 32 && bytes[i] <= 126) ? String.fromCharCode(bytes[i]) : " ";
-  }
-  if (tailAscii.includes("THE MEDWAY BOYS")) return "The Medway Boys Packer";
-
-  // F. Fire Packer — near entry header or trailing metadata
-  if (findAsciiSignature(bytes, "Fire", 0, Math.min(bytes.length, 4096)) >= 0) {
-    return "Fire Packer";
-  }
-
-  // 1. Detect if it matches any raw (unwrapped) packer signature at the very beginning
-  if (bytes.length >= 4) {
-    const magicString = String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3]);
-    if (magicString === "ICE!") return "Pack-Ice v2.4 Raw Data";
-    if (magicString === "Ice!") return "Pack-Ice v2.1 Raw Data";
-    if (magicString === "ATOM") {
-      const uLen = readUint32BE(bytes, 4);
-      const pEnd = readUint32BE(bytes, 8);
-      if (uLen > 0 && uLen < 16777216 && pEnd <= bytes.length) {
-        return "Thunder V2 Raw Data";
-      }
-      return "Atomik Cruncher Raw Data";
+  const checkString = (offset: number, str: string): boolean => {
+    if (offset < 0 || offset + str.length > bytes.length) return false;
+    for (let i = 0; i < str.length; i++) {
+      if (bytes[offset + i] !== str.charCodeAt(i)) return false;
     }
-    if (magicString === "ATM3" || magicString === "ATM5") return "Atomik Cruncher Raw Data";
-    if (magicString === "JAM!" || magicString === "JAM ") return "The JAM Packer Raw Data";
-    if (magicString === "FIRE") return "Fire-Pack Raw Data";
-    if (magicString === "JEK!") return "Jek Packer Raw Data";
-    if (magicString === "LSD!") return "LSD Packer Raw Data";
-    if (magicString === "GOL!") return "Gollum Packer Raw Data";
-    if (magicString === "LOB!" || magicString === "LOB ") return "LOB's File-Compressor Raw Data";
-    if (magicString === "QPAC") return "Qpac Raw Data";
+    return true;
+  };
+
+  const checkLastLongString = (str: string): boolean => {
+    if (bytes.length < 4) return false;
+    return checkString(bytes.length - 4, str);
+  };
+
+  // ----- 1. 4PAK -----
+  if (checkLong(58, 0x4e714ef9)) {
+    return "4PAK Executable Packer";
   }
 
-  // 2. Scan the file interior ASCII context for signatures (works for all files/stubs)
+  // ----- 2. Automation Packer -----
+  // Data: ISDATA('LSD!') || ISDATA('LSD$') || ISDATA('AUTM') (v2.3/4), ISDATA('LSDC') (Chunked), ISDATA('AU5!') (v5.01), ISDATA('AU5C') (v5.01 Chunked)
+  if (checkString(0, "LSD!")) return "Automation Packer v2.x/v3.x / JAM / LSD Raw Data";
+  if (checkString(0, "LSD$") || checkString(0, "AUTM")) {
+    return "Automation Packer v2.x/v3.x Raw Data";
+  }
+  if (checkString(0, "LSDC")) {
+    return "Automation Chunked Raw Data";
+  }
+  if (checkString(0, "AU5!")) {
+    return "Automation Packer v5.01 Raw Data";
+  }
+  if (checkString(0, "AU5C")) {
+    return "Automation Packer v5.01 Chunked Raw Data";
+  }
+  // Program: ISPROG(482, 0x2e337200l) (v2.3r), ISPROG(482, 0x2e353100l) || ISPROG(482, 0x2e357200l) (v2.51), ISPROG(836, 'AU5!') (v5.01)
+  if (checkLong(482, 0x2e337200)) {
+    return "Automation Packer v2.3r Executable";
+  }
+  if (checkLong(482, 0x2e353100) || checkLong(482, 0x2e357200)) {
+    return "Automation Packer v2.51 Executable";
+  }
+  if (checkString(836, "AU5!")) {
+    return "Automation Packer v5.01 Executable";
+  }
+
+  // ----- 3. ATOM Packer (inc. Thunder / BMT) -----
+  // Data: ISDATA('ATOM') (v3.1/3.3/Thunder), ... ATM5
+  if (checkString(0, "ATOM")) {
+    return "Atomik / Thunder Raw Data";
+  }
+  if (checkString(0, "ATM5")) {
+    return "Atomik Cruncher v3.5 Raw Data";
+  }
+  // Program: ISPROG(516, 'ATOM') (v3.1), ISPROG(538, 'ATOM') (v3.3), ISPROG(564, '/BMT') (v3.3 BMT), ISPROG(336, 0x1b3250f0l) || ISPROG(634, '3.5 ') (v3.5)
+  if (checkString(516, "ATOM")) {
+    return "Atomik Cruncher v3.1 Executable Packer";
+  }
+  if (checkString(538, "ATOM")) {
+    return "Atomik Cruncher v3.3 Executable Packer";
+  }
+  if (checkString(564, "/BMT")) {
+    return "Atomik Cruncher v3.3 BMT Executable Packer";
+  }
+  if (checkLong(336, 0x1b3250f0) || checkString(634, "3.5 ")) {
+    return "Atomik Cruncher v3.5 Executable Packer";
+  }
+
+  // ----- 4. BRAS -----
+  if (checkString(30, "BRAS")) {
+    return "BRAS Executable Packer";
+  }
+
+  // ----- 5. Bytekiller -----
+  if (checkLastLongString("JPM!")) {
+    return "Bytekiller (JPM Data) Raw Data";
+  }
+  if (checkLong(72, 0x0007fd00)) {
+    return "Bytekiller v2 Executable Packer";
+  }
+  if (checkLong(72, 0x224a7053)) {
+    return "Bytekiller v3 Executable Packer";
+  }
+  if (checkLong(28, 0x487a00aa)) {
+    return "Bytekiller (Russ Payne) Executable Packer";
+  }
+  if (checkLong(190, 0x4efa0020)) {
+    return "Bytekiller (JPM Prog) Executable Packer";
+  }
+
+  // ----- 6. DC Squish Packer -----
+  if (checkString(40, "Squi")) {
+    if (checkString(58, "10")) return "DC Squish Packer v1.0 Executable";
+    if (checkString(58, "12")) return "DC Squish Packer v1.2 Executable";
+    if (checkString(58, "14")) return "DC Squish Packer v1.4 Executable";
+    if (checkString(58, "21")) return "DC Squish Packer v2.1 Executable";
+    return "DC Squish Packer Executable";
+  }
+
+  // ----- 7. Gollum Packer -----
+  if (checkLong(192, 0x42401018)) {
+    return "Gollum Packer (Non-Huffman) Executable";
+  }
+  if (checkLong(192, 0x22572c7a)) {
+    return "Gollum Packer (Huffman) Executable";
+  }
+
+  // ----- 8. Gremlin Packer -----
+  if (checkLastLongString("GUS*")) {
+    return "Gremlin Packer Raw Data";
+  }
+
+  // ----- 9. Happy Packer -----
+  if (checkString(52, "EASY")) {
+    return "Happy Packer Executable";
+  }
+
+  // ----- 10. ICE Packer / Superior -----
+  if (checkLastLongString("Ice!")) {
+    return "ICE Packer v1.1 Raw Data";
+  }
+  if (checkString(0, "Ice!")) {
+    return "Pack-Ice v2.0/v2.2 Raw Data";
+  }
+  if (checkString(0, "ICE!")) {
+    return "Pack-Ice v2.3/v2.4 Raw Data";
+  }
+  if (checkLong(70, 0x610000a0)) {
+    return "Pack-Ice v1.1 Executable Packer";
+  }
+  if (checkWord(54, 0x2e3c)) {
+    return "Pack-Ice v2.0 Executable Packer";
+  }
+  if (checkString(452, "Ice!")) {
+    return "Pack-Ice v2.2 Executable Packer";
+  }
+  if (checkString(448, "ICE!")) {
+    return "Pack-Ice v2.3 Executable Packer";
+  }
+  if (checkString(442, "ICE!")) {
+    return "Pack-Ice v2.4 Executable Packer";
+  }
+  if (checkLong(28, 0x41fa0220)) {
+    return "Superior PE Executable Packer";
+  }
+
+  // ----- 11. IMP Packer -----
+  if (checkString(0, "IMP!")) {
+    return "IMP Packer Raw Data";
+  }
+
+  // ----- 12. Ivory Dragon Packer -----
+  if (checkLastLongString("PAWN")) {
+    return "Ivory Dragon Packer Raw Data";
+  }
+  if (checkLong(96, 0x610000b2)) {
+    return "Ivory Dragon Packer Executable";
+  }
+
+  // ----- 13. FIRE Packer -----
+  if (checkLastLongString("Fire")) {
+    return "FIRE Packer v1.0 Raw Data";
+  }
+  if (checkString(0, "FIRE")) {
+    return "FIRE Packer v2.0 Raw Data";
+  }
+  if (checkString(36, "ire ")) {
+    return "FIRE Packer v1.0 Executable";
+  }
+  if (checkString(36, "ire!")) {
+    return "FIRE Packer v2.0 Executable";
+  }
+
+  // ----- 14. J Packer -----
+  if (checkString(576, "cker")) {
+    return "J Packer Executable";
+  }
+
+  // ----- 15. JAM Packer -----
+  if (checkString(0, "LZH!")) {
+    return "JAM LZH Raw Data";
+  }
+  if (checkString(0, "LZW!")) {
+    return "JAM LZW Raw Data";
+  }
+  if (checkString(672, "JAM ") || checkString(674, "JAM ") || checkString(706, "JAM ")) {
+    return "JAM Packer v1 Executable";
+  }
+  if (checkString(1170, "LSD!")) {
+    return "JAM Packer v2 JAM3 Executable";
+  }
+  if (checkString(1170, "LZH!")) {
+    return "JAM Packer LZH JAM3 Executable";
+  }
+  if (checkString(758, "LSD!")) {
+    return "JAM Packer v2 JAM4 Executable";
+  }
+  if (checkString(1194, "LZH!")) {
+    return "JAM Packer LZH JAM4 Executable";
+  }
+  if (checkString(544, "LZW!")) {
+    return "JAM Packer LZW JAM4 Executable";
+  }
+  if (checkString(712, "Ice!")) {
+    return "JAM Packer ICE JAM4 Executable";
+  }
+
+  // ----- 16. JEK Packer -----
+  if (checkLong(28, 0x2a6f0004) && checkLong(32, 0x226d0010)) {
+    return "JEK Packer / Byte Killer Executable";
+  }
+  if (checkLastLongString("JEK!")) {
+    return "JEK Packer Raw Data";
+  }
+  if (checkString(638, "JEK ")) {
+    return "JEK Packer v1.2d Executable";
+  }
+  if (checkString(646, "JEK ")) {
+    return "JEK Packer v1.3d Executable";
+  }
+
+  // ----- 17. Le Crunch Packer -----
+  if (checkString(0, "LeCr")) {
+    return "Le Crunch Packer Raw Data";
+  }
+
+  // ----- 18. LSD Packer -----
+  if (checkLastLongString("END!") || checkLastLongString("LSD!")) {
+    return "LSD Packer Raw Data";
+  }
+  if (checkString(638, "PLEA") || checkString(638, "PACK")) {
+    return "LSD Packer Executable";
+  }
+  if (checkString(650, "1.2 ")) {
+    return "LSD Packer v1.2 Executable";
+  }
+
+  // ----- 19. MPack Packer -----
+  if (checkLong(230, 0x4ac04440)) {
+    return "MPack Packer Type 1 Executable";
+  }
+  if (checkLong(228, 0x4ac04440)) {
+    return "MPack Packer Type 2 Executable";
+  }
+  if (checkLong(230, 0x7800284a)) {
+    return "MPack Packer Type 3 Executable";
+  }
+
+  // ----- 20. PA Packer -----
+  if (checkLong(102, 0x425d51cf)) {
+    return "PA Packer Executable";
+  }
+
+  // ----- 21. PFX Packer -----
+  if (checkString(422, "-lz5")) {
+    return "PFX Packer v1.13 Executable";
+  }
+  if (checkString(564, "-lz5")) {
+    return "PFX Packer v1.13/v1.6 Executable";
+  }
+  if (checkString(586, "-lz5")) {
+    return "PFX Packer v1.8/v2.1 Executable";
+  }
+  if (checkString(1052, "-lz5")) {
+    return "PFX Packer v2.1 (Anti-Virus) Executable";
+  }
+
+  // ----- 22. Pompey Packer -----
+  if (checkLastLongString("POPI") || checkLastLongString("PUFF")) {
+    return "Pompey Packer Raw Data";
+  }
+  if (checkLong(158, 0x00847604)) {
+    return "Pompey Packer v1.5 Executable";
+  }
+  if (checkLong(158, 0x60000084)) {
+    return "Pompey Packer v1.9 Executable";
+  }
+  if (checkLong(158, 0x340460f0)) {
+    return "Pompey Packer v1.9 Var 1 Executable";
+  }
+  if (checkLong(158, 0x3f3c000a)) {
+    return "Pompey Packer v1.9 Var 2 Executable";
+  }
+  if (checkLong(158, 0x76046022)) {
+    return "Pompey Packer v2.3 Executable";
+  }
+  if (checkLong(158, 0x65647201)) {
+    return "Pompey Packer v2.6 Executable";
+  }
+  if (checkLong(158, 0x60e67205)) {
+    return "Pompey Packer v3.0 Executable";
+  }
+
+  // ----- 23. Power Packer -----
+  if (checkString(0, "PP20")) {
+    return "Power Packer v2.0 Raw Data";
+  }
+
+  // ----- 24. QPak Packer -----
+  if (checkString(4, "2-JM")) {
+    return "QPak Packer v2 Raw Data";
+  }
+  if (checkString(52, "2-JM")) {
+    return "QPak Packer v2 Executable";
+  }
+
+  // ----- 25. RNC Packer (Propack) -----
+  if (checkLong(0, 0x524E4301)) {
+    return "Rob Northen Compression (Method 1) Raw Data";
+  }
+  if (checkLong(0, 0x524E4302)) {
+    return "Rob Northen Compression (Method 2) Raw Data";
+  }
+  if (checkLong(146, 0x0c54601a)) {
+    return "RNC Copylock Executable";
+  }
+  if (checkLong(642, 0x524e4302)) {
+    return "RNC2 Executable";
+  }
+
+  // ----- 26. Sentry Packer -----
+  if (checkLastLongString("Snt2")) {
+    return "Sentry Packer v2.05 Raw Data";
+  }
+  if (checkString(522, "2.05")) {
+    return "Sentry Packer v2.05 Executable";
+  }
+  if (checkString(526, "2.11")) {
+    return "Sentry Packer v2.11 Executable";
+  }
+
+  // ----- 27. Speedpacker -----
+  if (checkString(0, "SP20")) {
+    return "Speedpacker v2.0 Raw Data";
+  }
+  if (checkString(0, "SPv3")) {
+    return "Speedpacker v3.0 Raw Data";
+  }
+  if (checkString(542, "SP20")) {
+    return "Speedpacker v2.0 Executable";
+  }
+  if (checkLong(28, 0x4e417633)) {
+    return "Speedpacker v3.0 Var 1 Executable";
+  }
+  if (checkString(1816, "SPv3")) {
+    return "Speedpacker v3.0 Var 2 Executable";
+  }
+  if (checkString(30, "SPv3")) {
+    return "Speedpacker v3.0 Var 3 Executable";
+  }
+
+  // ----- 28. STOS Packer -----
+  if (checkLong(68, 0x0007fd00)) {
+    return "STOS Executable Packer";
+  }
+
+  // ----- 29. Thunder Packer -----
+  if (checkString(422, "ATOM")) {
+    return "Thunder V1 Executable Packer";
+  }
+  if (checkString(480, "ATOM")) {
+    return "Thunder V1.1 Executable Packer";
+  }
+  if (checkString(452, "ATOM")) {
+    return "Thunder V2 Executable Packer";
+  }
+
+  // ----- 30. Vic2 Packer -----
+  if (checkString(0, "Vic2")) {
+    return "Vic2 Packer Raw Data";
+  }
+
+  // ----- 31. Degas Elite (Graphics Format) -----
+  if (checkWord(0, 0x8000) || checkWord(0, 0x8001) || checkWord(0, 0x8002)) {
+    return "Degas Elite Compressed Image";
+  }
+
+  // ----- 32. Unidentified / Unknown Packers -----
+  if (checkLong(118, 0x4e714e71)) {
+    return "Unidentified/Unknown Packer 1";
+  }
+  if (checkString(442, "****") && checkWord(0, 0x601a)) {
+    return "Unidentified/Unknown Packer 2";
+  }
+  if (checkLong(572, 0x4e5a2c1f)) {
+    return "Unidentified/Unknown Packer 3";
+  }
+  if (checkLong(522, 0x44fc0010)) {
+    return "Unidentified/Unknown Packer 4";
+  }
+
+  // ----- Heuristics & Scan-Based fallback -----
+  // If the file didn't match any precise signature template, we run a scan-based keyword search on the first 8192 bytes
   let scanLength = Math.min(bytes.length, 8192);
   let asciiContext = "";
   for (let i = 0; i < scanLength; i++) {
@@ -88,43 +433,68 @@ function detectPackerSignatureInternal(bytes: Uint8Array): string {
   if (asciiContext.includes("ICE!")) return "Pack-Ice v2.4 Executable Packer";
   if (asciiContext.includes("Ice!")) return "Pack-Ice v2.1 Executable Packer";
   if (asciiContext.includes("Pack-Ice")) return "Pack-Ice v2.1 Executable Packer";
-  if (asciiContext.includes("DPAK") || asciiContext.includes("NEW_DPAK") || asciiContext.includes("XERUD")) return "Mike Watson (Xerud) NEW_DPAK";
-  if (asciiContext.includes("JAM Packer") || asciiContext.includes("The JAM Packer") || asciiContext.includes("JAM PACKER")) return "The JAM Packer Executable";
-  // C. JPM Thunder Packer / ATOMIC
-  if (asciiContext.includes("ATOMIC")) return "JPM Thunder Packer / ATOMIC";
-  if (asciiContext.includes("THUNDER")) return "JPM Thunder Packer / ATOMIC";
+  if (asciiContext.includes("DPAK") || asciiContext.includes("NEW_DPAK") || asciiContext.includes("XERUD")) {
+    return "Mike Watson (Xerud) NEW_DPAK";
+  }
+  if (asciiContext.includes("JAM Packer") || asciiContext.includes("The JAM Packer") || asciiContext.includes("JAM PACKER")) {
+    return "The JAM Packer Executable";
+  }
+  if (asciiContext.includes("ATOMIC") || asciiContext.includes("THUNDER")) {
+    return "JPM Thunder Packer / ATOMIC";
+  }
+
   if (asciiContext.includes("ATOM") || asciiContext.includes("ATM5") || asciiContext.includes("ATM3") || asciiContext.includes("Atomik")) {
     const idx = asciiContext.indexOf("ATOM");
     if (idx >= 0 && idx + 12 <= bytes.length) {
       const uLen = readUint32BE(bytes, idx + 4);
-      const pEnd = readUint32BE(bytes, idx + 8);
-      if (uLen > 0 && uLen < 16777216 && idx + pEnd <= bytes.length) {
-        return "Thunder V2 Executable Packer";
+      const pLength = readUint32BE(bytes, idx + 8);
+      if (uLen > 0 && uLen < 16777216 && idx + pLength <= bytes.length) {
+        const absolutePackedEnd = idx + pLength;
+        const absoluteLiteralLenOffset = absolutePackedEnd - 4;
+        let isV2 = false;
+        if (absoluteLiteralLenOffset >= idx + 12 && absoluteLiteralLenOffset + 4 <= bytes.length) {
+          const literalLength = readUint32BE(bytes, absoluteLiteralLenOffset);
+          const absoluteLiteralsStart = absoluteLiteralLenOffset - literalLength;
+          if (absoluteLiteralsStart >= idx + 12 && absoluteLiteralsStart <= absolutePackedEnd) {
+            isV2 = true;
+          }
+        }
+        if (isV2) return "Thunder V2 Executable Packer";
+        try {
+          const testThunV1 = decompressThunderV1(bytes, idx);
+          if (testThunV1) return "Thunder V1 Executable Packer";
+        } catch (e) {}
+        return "Atomik Cruncher Executable Packer";
       }
     }
     return "Atomik Cruncher Executable Packer";
   }
+
   if (asciiContext.includes("AUTOMATION PACKER V2.3")) return "Automation 2.3 Packer";
-  if (asciiContext.includes("AUTOMATION PACKER") || asciiContext.includes("Automation") || asciiContext.includes("COMPACTER")) return "Automation Compacter";
-  if (asciiContext.includes("POMPEY PIRATES") || asciiContext.includes("POMPEY")) return "Pompey Pirates Packer";
-  if (asciiContext.includes("THUN") || asciiContext.includes("TP")) return "Thunder Packer";
-  if (asciiContext.includes("JEK PACKER") || asciiContext.includes("JEK!")) return "JEK Packer / Byte Killer";
-  if (findAsciiSignature(bytes, "Fire", 0, Math.min(bytes.length, 32768)) >= 0) return "Fire Packer";
-
-  if (bytes.length >= 32 && bytes[0x1C] === 0x48 && bytes[0x1D] === 0xE7) {
-    for (let j = 0x1E; j < Math.min(bytes.length - 1, 0x40); j++) {
-      if (bytes[j] === 0x2A && bytes[j + 1] === 0x7F) {
-        return "Byte Killer (Self-Extracting Stub)";
-      }
-    }
+  if (asciiContext.includes("AUTOMATION PACKER") || asciiContext.includes("Automation") || asciiContext.includes("COMPACTER")) {
+    return "Automation Compacter";
   }
+  if (asciiContext.includes("POMPEY PIRATES") || asciiContext.includes("POMPEY")) return "Pompey Pirates Packer";
+  if (asciiContext.includes("JEK PACKER") || asciiContext.includes("JEK!")) return "JEK Packer / Byte Killer";
 
-  // Custom check for byte/word-swapped executable start
+  // Tail-end scanning fallback
+  const tailStart = Math.max(0, bytes.length - 1024);
+  let tailAscii = "";
+  for (let i = tailStart; i < bytes.length; i++) {
+    tailAscii += (bytes[i] >= 32 && bytes[i] <= 126) ? String.fromCharCode(bytes[i]) : " ";
+  }
+  if (tailAscii.includes("THE MEDWAY BOYS")) return "The Medway Boys Packer";
+  if (tailAscii.includes("JPM!")) return "Bytekiller (JPM Data) Raw Data";
+  if (tailAscii.includes("GUS*")) return "Gremlin Packer Raw Data";
+  if (tailAscii.includes("JEK!") || tailAscii.includes("JEK PACKER")) return "JEK Packer / Byte Killer";
+
+  // ----- Atari ST Executable Header fallback -----
+  const isExecutableHeader = (bytes[0] === 0x60 && (bytes[1] === 0x1A || bytes[1] === 0x1C || bytes[1] === 0x00));
   const isByteSwappedHeader = (bytes.length >= 4 && bytes[0] === 0x1A && bytes[1] === 0x00 && bytes[3] === 0x61);
-
   if (isExecutableHeader || isByteSwappedHeader) {
     return "Atari ST Executable (BRA $1C)";
   }
+
   return "None";
 }
 
@@ -229,6 +599,68 @@ export function getClusterChain(diskBytes: Uint8Array, startCluster: number, geo
   return chain;
 }
 
+export function scoreDirectoryAtOffset(diskBytes: Uint8Array, offset: number, maxEntries: number): number {
+  if (offset + (maxEntries * 32) > diskBytes.length) {
+    maxEntries = Math.floor((diskBytes.length - offset) / 32);
+  }
+  if (maxEntries <= 0) return -1;
+
+  let score = 0;
+  for (let i = 0; i < maxEntries; i++) {
+    const entryOff = offset + (i * 32);
+    const firstByte = diskBytes[entryOff];
+
+    if (firstByte === 0x00) continue;
+
+    // Check first byte validity based on standard GEMDOS/MS-DOS rules
+    const syms = "_^$~!#%&-{}()@'".split('').map(c => c.charCodeAt(0));
+    const isValidFirst = (
+      firstByte === 0xE5 || firstByte === 0x05 ||
+      (firstByte >= 0x41 && firstByte <= 0x5A) ||
+      (firstByte >= 0x61 && firstByte <= 0x7A) ||
+      (firstByte >= 0x30 && firstByte <= 0x39) ||
+      syms.includes(firstByte) ||
+      (firstByte >= 128 && firstByte <= 254 && firstByte !== 0xF8 && firstByte !== 0xF9)
+    );
+    
+    if (!isValidFirst) {
+      return -1; // Heavy penalty for garbage/FAT tables
+    }
+
+    const attr = diskBytes[entryOff + 11];
+    if ((attr & 0xC0) !== 0) {
+      return -1; // Heavy penalty for garbage/corrupted flags
+    }
+
+    // Check name characters: must be valid ASCII character codes and NO null bytes at all in first 11 chars!
+    let hasInvalidChars = false;
+    for (let j = 0; j < 11; j++) {
+      const char = diskBytes[entryOff + j];
+      if (char === 0x00) {
+        // Standard directories pad with spaces (0x20), never with nulls (0x00)
+        hasInvalidChars = true;
+        break;
+      }
+      if (char < 0x20 && char !== 0x05) {
+        hasInvalidChars = true;
+        break;
+      }
+    }
+
+    if (hasInvalidChars) {
+      return -1; // Heavy penalty
+    }
+
+    const cluster = diskBytes[entryOff + 26] | (diskBytes[entryOff + 27] << 8);
+    if (cluster > 4000) {
+      return -1; // Heavy penalty
+    }
+
+    score++;
+  }
+  return score;
+}
+
 export function getDiskDirEntries(diskBytes: Uint8Array, dirCluster: number, geometry: DiskGeometry): DiskFileInfo[] {
   const entries: DiskFileInfo[] = [];
   const segments: { bytes: Uint8Array; diskOffset: number }[] = [];
@@ -239,13 +671,57 @@ export function getDiskDirEntries(diskBytes: Uint8Array, dirCluster: number, geo
       diskOffset: geometry.rootDirStart
     });
   } else {
-    const chain = getClusterChain(diskBytes, dirCluster, geometry);
-    for (let cluster of chain) {
-      const offset = geometry.dataAreaStart + (cluster - 2) * geometry.bytesPerCluster;
+    // Bulletproof direct physical subdirectory search:
+    let actualOffset: number | null = null;
+    for (let offset = 512; offset < diskBytes.length - 64; offset += 512) {
+      if (diskBytes[offset] === 0x2E && 
+          diskBytes[offset + 1] === 0x20 && 
+          diskBytes[offset + 11] === 0x10 &&
+          diskBytes[offset + 32] === 0x2E &&
+          diskBytes[offset + 33] === 0x2E &&
+          diskBytes[offset + 43] === 0x10) {
+        
+        const startCluster = diskBytes[offset + 26] | (diskBytes[offset + 27] << 8);
+        if (startCluster === dirCluster) {
+          actualOffset = offset;
+          break;
+        }
+      }
+    }
+
+    if (actualOffset !== null) {
+      console.log(`[getDiskDirEntries] Bulletproof bypassed directory cluster ${dirCluster} to physical offset ${actualOffset}.`);
       segments.push({
-        bytes: diskBytes.slice(offset, offset + geometry.bytesPerCluster),
-        diskOffset: offset
+        bytes: diskBytes.slice(actualOffset, actualOffset + geometry.bytesPerCluster),
+        diskOffset: actualOffset
       });
+
+      const chain = getClusterChain(diskBytes, dirCluster, geometry);
+      if (chain.length > 1) {
+        const calcOffsetFirst = geometry.dataAreaStart + (dirCluster - 2) * geometry.bytesPerCluster;
+        const delta = actualOffset - calcOffsetFirst;
+
+        for (let i = 1; i < chain.length; i++) {
+          const c = chain[i];
+          const calcOffsetC = geometry.dataAreaStart + (c - 2) * geometry.bytesPerCluster;
+          const realOffsetC = calcOffsetC + delta;
+          if (realOffsetC >= 0 && realOffsetC + geometry.bytesPerCluster <= diskBytes.length) {
+            segments.push({
+              bytes: diskBytes.slice(realOffsetC, realOffsetC + geometry.bytesPerCluster),
+              diskOffset: realOffsetC
+            });
+          }
+        }
+      }
+    } else {
+      const chain = getClusterChain(diskBytes, dirCluster, geometry);
+      for (let cluster of chain) {
+        const offset = geometry.dataAreaStart + (cluster - 2) * geometry.bytesPerCluster;
+        segments.push({
+          bytes: diskBytes.slice(offset, offset + geometry.bytesPerCluster),
+          diskOffset: offset
+        });
+      }
     }
   }
 
@@ -292,6 +768,386 @@ export function getDiskDirEntries(diskBytes: Uint8Array, dirCluster: number, geo
   return entries;
 }
 
+export function isGeometryCompliant(diskBytes: Uint8Array): boolean {
+  if (!diskBytes || diskBytes.length < 512) return false;
+  
+  const bytesPerSector = diskBytes[11] | (diskBytes[12] << 8);
+  const sectorsPerCluster = diskBytes[13];
+  const reservedSectors = diskBytes[14] | (diskBytes[15] << 8);
+  const numFats = diskBytes[16];
+  const rootDirEntries = diskBytes[17] | (diskBytes[18] << 8);
+  const totalSectors = diskBytes[19] | (diskBytes[20] << 8);
+  const sectorsPerFat = diskBytes[22] | (diskBytes[23] << 8);
+
+  // Check typical non-compliant/fake properties for standard Atari disks
+  if (bytesPerSector !== 512) return false;
+  if (sectorsPerCluster !== 1 && sectorsPerCluster !== 2 && sectorsPerCluster !== 4 && sectorsPerCluster !== 8) return false;
+  if (reservedSectors === 0 || reservedSectors > 10) return false;
+  if (numFats !== 1 && numFats !== 2) return false;
+  if (rootDirEntries !== 64 && rootDirEntries !== 112 && rootDirEntries !== 224 && rootDirEntries !== 576) return false;
+  if (sectorsPerFat === 0 || sectorsPerFat > 32) return false;
+  if (totalSectors === 0 || totalSectors * 512 > diskBytes.length + 102400) return false;
+
+  return true;
+}
+
+export function discoverDirectoryContent(diskBytes: Uint8Array): {
+  rootDirStart: number;
+  rootDirEntries: number;
+  bytesPerCluster: number;
+} {
+  let bytesPerSector = diskBytes[11] | (diskBytes[12] << 8);
+  if (bytesPerSector !== 512 && bytesPerSector !== 1024) bytesPerSector = 512;
+  let sectorsPerCluster = diskBytes[13];
+  if (sectorsPerCluster === 0 || sectorsPerCluster > 8) sectorsPerCluster = 2; 
+  
+  const bytesPerCluster = bytesPerSector * sectorsPerCluster;
+
+  // Let's determine a logical default based on total file size
+  let bestOffset = 3584; 
+  let expectedEntries = 112;
+
+  if (diskBytes.length <= 368640) {
+    bestOffset = 2560; // Sector 5 (360KB single sided default)
+    expectedEntries = 64;
+  } else {
+    bestOffset = 3584; // Sector 7 (720KB double sided default)
+    expectedEntries = 112;
+  }
+
+  let bestScore = 0; // Initialize at 0 so we only choose a scan candidate if it has actual valid formatted file records
+
+  // Search through all sectors up to 30 sectors (15360 bytes)
+  for (let offset = 512; offset < 15360; offset += 512) {
+    if (offset + 512 > diskBytes.length) break;
+
+    const score = scoreDirectoryAtOffset(diskBytes, offset, 16);
+    if (score > bestScore) {
+      bestScore = score;
+      bestOffset = offset;
+      expectedEntries = (offset < 3000) ? 64 : 112;
+    }
+  }
+
+  return {
+    rootDirStart: bestOffset,
+    rootDirEntries: expectedEntries,
+    bytesPerCluster
+  };
+}
+
+export function scoreDirectory(diskBytes: Uint8Array): number {
+  let bestScore = 0;
+
+  for (let offset = 512; offset < 15360; offset += 512) {
+    if (offset + 512 > diskBytes.length) break;
+
+    const rootDirEntries = (offset < 3000) ? 64 : 112;
+    const score = scoreDiskLayoutWithGeom(diskBytes, offset, rootDirEntries);
+    if (score > bestScore) {
+      bestScore = score;
+    }
+  }
+
+  return bestScore;
+}
+
+export function deduceGeometryForRootOffset(diskBytes: Uint8Array, rootDirStart: number, rootDirEntries: number): DiskGeometry {
+  const bytesPerSector = 512;
+  const reservedSectors = 1;
+  const numFats = 2;
+  
+  // 1. Start with the boot sector's BPB value as a candidate if valid
+  let sectorsPerCluster = diskBytes[13];
+  if (sectorsPerCluster !== 1 && sectorsPerCluster !== 2 && sectorsPerCluster !== 4 && sectorsPerCluster !== 8) {
+    sectorsPerCluster = 2; // Default for ST disks
+  }
+  
+  // 2. Calculate initial sectorsPerFat based on rootDirStart
+  let sectorsPerFat = Math.max(1, Math.floor((rootDirStart - 512) / 1024));
+  let singleFatSize = sectorsPerFat * bytesPerSector;
+  let fatTableStart = reservedSectors * bytesPerSector;
+  let fatTableSize = numFats * singleFatSize;
+  let rootDirSectors = Math.floor((rootDirEntries * 32 + (bytesPerSector - 1)) / bytesPerSector);
+  let dataAreaStart = rootDirStart + rootDirSectors * bytesPerSector;
+  
+  // 3. Scan the disk to see if any subdirectories imply a different sectorsPerCluster and dataAreaStart!
+  const subDirs: { cluster: number; offset: number }[] = [];
+  for (let offset = 512; offset < diskBytes.length - 64; offset += 512) {
+    if (diskBytes[offset] === 0x2E && 
+        diskBytes[offset + 1] === 0x20 && 
+        diskBytes[offset + 11] === 0x10 &&
+        diskBytes[offset + 32] === 0x2E &&
+        diskBytes[offset + 33] === 0x2E &&
+        diskBytes[offset + 43] === 0x10) {
+      
+      const startCluster = diskBytes[offset + 26] | (diskBytes[offset + 27] << 8);
+      if (startCluster >= 2 && startCluster < 4096) {
+        subDirs.push({ cluster: startCluster, offset });
+      }
+    }
+  }
+
+  let bestSectorsPerCluster = sectorsPerCluster;
+  let bestDataAreaStart = dataAreaStart;
+  
+  if (subDirs.length > 0) {
+    let maxAgreement = 0;
+    for (const testSPC of [1, 2, 4]) {
+      const counts = new Map<number, number>();
+      for (const sd of subDirs) {
+        const impliedDataAreaStart = sd.offset - (sd.cluster - 2) * testSPC * 512;
+        if (impliedDataAreaStart >= rootDirStart + rootDirSectors * 512 && impliedDataAreaStart % 512 === 0) {
+          counts.set(impliedDataAreaStart, (counts.get(impliedDataAreaStart) || 0) + 1);
+        }
+      }
+      for (const [das, count] of counts.entries()) {
+        if (count > maxAgreement) {
+          maxAgreement = count;
+          bestSectorsPerCluster = testSPC;
+          bestDataAreaStart = das;
+        } else if (count === maxAgreement && maxAgreement > 0) {
+          const currentDiff = Math.abs(bestDataAreaStart - (rootDirStart + rootDirSectors * 512));
+          const testDiff = Math.abs(das - (rootDirStart + rootDirSectors * 512));
+          if (testDiff < currentDiff) {
+            bestSectorsPerCluster = testSPC;
+            bestDataAreaStart = das;
+          }
+        }
+      }
+    }
+    sectorsPerCluster = bestSectorsPerCluster;
+    dataAreaStart = bestDataAreaStart;
+    
+    // Dynamically adjust root directory size if the space changed!
+    if (dataAreaStart > rootDirStart) {
+      rootDirSectors = Math.floor((dataAreaStart - rootDirStart) / bytesPerSector);
+      rootDirEntries = rootDirSectors * 16;
+    }
+    console.log(`[deduceGeometryForRootOffset] Subdirectory vote determined sectorsPerCluster = ${sectorsPerCluster}, dataAreaStart = ${dataAreaStart}, rootDirEntries = ${rootDirEntries}.`);
+  }
+  
+  // Recalculate dependent parameters with updated factors
+  singleFatSize = sectorsPerFat * bytesPerSector;
+  fatTableStart = reservedSectors * bytesPerSector;
+  fatTableSize = numFats * singleFatSize;
+  const bytesPerCluster = sectorsPerCluster * bytesPerSector;
+  let totalSectors = Math.floor(diskBytes.length / 512);
+
+  if (diskBytes.length >= 512) {
+    const bytesPerSectVal = diskBytes[11] | (diskBytes[12] << 8);
+    const bpbSectVal = diskBytes[19] | (diskBytes[20] << 8);
+    if (bytesPerSectVal === 512 && bpbSectVal > 0 && bpbSectVal <= totalSectors + 32) {
+      totalSectors = bpbSectVal;
+    }
+  }
+
+  return {
+    bytesPerSector,
+    sectorsPerCluster,
+    reservedSectors,
+    numFats,
+    rootDirEntries,
+    totalSectors,
+    sectorsPerFat,
+    singleFatSize,
+    fatTableStart,
+    fatTableSize,
+    rootDirStart,
+    rootDirSectors,
+    dataAreaStart,
+    bytesPerCluster,
+    isFallback: true
+  };
+}
+
+export function scoreDiskLayoutWithGeom(diskBytes: Uint8Array, rootDirStart: number, rootDirEntries: number): number {
+  if (rootDirStart + (rootDirEntries * 32) > diskBytes.length) {
+    return -100;
+  }
+  
+  // 1. Score the root directory itself
+  const rScore = scoreDirectoryAtOffset(diskBytes, rootDirStart, rootDirEntries);
+  if (rScore < 0) return -100; // Not a valid directory structure
+
+  if (rScore === 0) return 0; // Valid but empty
+
+  // 2. Parse entries and score subdirectories
+  const tempGeom = deduceGeometryForRootOffset(diskBytes, rootDirStart, rootDirEntries);
+  const rootEntries = getDiskDirEntries(diskBytes, 0, tempGeom);
+
+  let subDirectoryScoreSum = 0;
+  let subDirectoryCount = 0;
+
+  for (const entry of rootEntries) {
+    if (entry.isDir && !entry.isDeleted && entry.name !== '.' && entry.name !== '..') {
+      const clusterNum = (typeof entry.cluster === 'number') ? entry.cluster : parseInt(entry.cluster, 10);
+      if (!isNaN(clusterNum) && clusterNum >= 2 && clusterNum < 4000) {
+        const chain = getClusterChain(diskBytes, clusterNum, tempGeom);
+        if (chain.length > 0) {
+          const firstCluster = chain[0];
+          const offset = tempGeom.dataAreaStart + (firstCluster - 2) * tempGeom.bytesPerCluster;
+          const subScore = scoreDirectoryAtOffset(diskBytes, offset, 16);
+          if (subScore >= 0) {
+            // Found a valid subdirectory! Award it
+            subDirectoryScoreSum += (subScore + 5); 
+          } else {
+            // Highly likely mismatched layout, penalty!
+            subDirectoryScoreSum -= 30;
+          }
+          subDirectoryCount++;
+          if (subDirectoryCount >= 3) break;
+        }
+      } else if (!isNaN(clusterNum) && clusterNum !== 0) {
+        // Invalid cluster number in directory, penalty!
+        subDirectoryScoreSum -= 20;
+      }
+    }
+  }
+
+  return rScore + subDirectoryScoreSum;
+}
+
+export function deinterleaveSingleSided(diskBytes: Uint8Array, spt: number): Uint8Array {
+  const bytesPerTrackSide = spt * 512;
+  const totalSectors = Math.floor(diskBytes.length / 512);
+  const tracksEstimate = Math.ceil(totalSectors / (spt * 2));
+  
+  const reconstructed = new Uint8Array(tracksEstimate * bytesPerTrackSide);
+  let destPtr = 0;
+  
+  for (let t = 0; t < tracksEstimate; t++) {
+    const srcStart = t * 2 * bytesPerTrackSide;
+    if (srcStart >= diskBytes.length) break;
+    
+    const sliceLen = Math.min(bytesPerTrackSide, diskBytes.length - srcStart);
+    reconstructed.set(diskBytes.subarray(srcStart, srcStart + sliceLen), destPtr);
+    destPtr += sliceLen;
+  }
+  
+  return reconstructed.slice(0, destPtr);
+}
+
+export function optimizeDiskImage(
+  diskBytes: Uint8Array,
+  msaSectorsPerTrack?: number,
+  msaSides?: number
+): {
+  bytes: Uint8Array;
+  wasDeinterleaved: boolean;
+  isFallback: boolean;
+} {
+  // If the disk is very small (less than 450KB), it must be single sided anyway,
+  // so no need to de-interleave. Just return as is.
+  if (diskBytes.length < 450000) {
+    return { bytes: diskBytes, wasDeinterleaved: false, isFallback: false };
+  }
+
+  // Parse Boot Sector BPB
+  let bpbTotalSectors = 0;
+  let bpbSides = 0;
+  let bpbSectPerTrack = 0;
+  let hasValidBPB = false;
+
+  if (diskBytes.length >= 512) {
+    const bytesPerSector = diskBytes[11] | (diskBytes[12] << 8);
+    const reservedSectors = diskBytes[14] | (diskBytes[15] << 8);
+    const numFats = diskBytes[16];
+    if (bytesPerSector === 512 && reservedSectors > 0 && reservedSectors <= 10 && (numFats === 1 || numFats === 2)) {
+      bpbTotalSectors = diskBytes[19] | (diskBytes[20] << 8);
+      bpbSides = diskBytes[26] | (diskBytes[27] << 8);
+      bpbSectPerTrack = diskBytes[24] | (diskBytes[25] << 8);
+      hasValidBPB = true;
+    }
+  }
+
+  // Determine if it is a faked double-sided format containing a single-sided "hidden" image
+  let shouldDeinterleave = false;
+  let useSpt = 9;
+
+  // Case 1: MSA header specifically says 1 side, but decompression generated a double-sided size
+  if (msaSides === 1) {
+    shouldDeinterleave = true;
+    useSpt = msaSectorsPerTrack || bpbSectPerTrack || 9;
+  }
+  // Case 2: BPB of the hidden image says 1 side or <= 820 sectors, but physical buffer is double-sided (~720KB+)
+  else if (hasValidBPB && (bpbSides === 1 || (bpbTotalSectors > 0 && bpbTotalSectors <= 820))) {
+    shouldDeinterleave = true;
+    useSpt = bpbSectPerTrack || msaSectorsPerTrack || 9;
+  }
+
+  if (shouldDeinterleave) {
+    console.log(`[Disk Optimizer] Detected single-sided BPB (${bpbTotalSectors || 720} sectors, sides=1) inside a double-sided container (length=${diskBytes.length}). Deinterleaving with spt = ${useSpt}...`);
+    const candidate = deinterleaveSingleSided(diskBytes, useSpt);
+    if (candidate.length >= 512) {
+      // Correct single-sided flags inside deinterleaved boot sector
+      candidate[26] = 1;
+      candidate[27] = 0;
+      
+      const currentTotalSectors = candidate[19] | (candidate[20] << 8);
+      // Ensure we have a valid single-sided total sector count in BPB
+      if (currentTotalSectors === 0 || currentTotalSectors > 820) {
+        const standardSingleSidedSectors = useSpt * 80; // (e.g. 720 or 800)
+        candidate[19] = standardSingleSidedSectors & 0xFF;
+        candidate[20] = (standardSingleSidedSectors >> 8) & 0xFF;
+      }
+    }
+    return {
+      bytes: candidate,
+      wasDeinterleaved: true,
+      isFallback: false
+    };
+  }
+
+  // --- HEURISTIC SCORING FALLBACK ---
+  // Only search / heuristically deinterleave if the original layout is UNREADABLE (asIsScore <= 0)
+  // because otherwise we risk destroying valid double-sided geometry.
+  const asIsDiscovery = discoverDirectoryContent(diskBytes);
+  const asIsScore = scoreDiskLayoutWithGeom(diskBytes, asIsDiscovery.rootDirStart, asIsDiscovery.rootDirEntries);
+
+  if (asIsScore <= 0) {
+    let bestDeinterleaved: Uint8Array | null = null;
+    let bestDeinterleavedScore = asIsScore;
+    let bestSpt = 9;
+
+    for (const spt of [9, 10, 11]) {
+      const candidate = deinterleaveSingleSided(diskBytes, spt);
+      const candDiscovery = discoverDirectoryContent(candidate);
+      const candidateScore = scoreDiskLayoutWithGeom(candidate, candDiscovery.rootDirStart, candDiscovery.rootDirEntries);
+      if (candidateScore > bestDeinterleavedScore) {
+        bestDeinterleavedScore = candidateScore;
+        bestDeinterleaved = candidate;
+        bestSpt = spt;
+      }
+    }
+
+    if (bestDeinterleaved && bestDeinterleavedScore > asIsScore && bestDeinterleavedScore >= 1) {
+      console.log(`[Disk Optimizer] Heuristics detected faked double-sided layout! Re-aligning to single-sided with spt = ${bestSpt}. Score improved from ${asIsScore} to ${bestDeinterleavedScore}.`);
+      const cleanedBytes = new Uint8Array(bestDeinterleaved);
+      if (cleanedBytes.length >= 512) {
+        // Force heads/sides in boot sector to 1
+        cleanedBytes[26] = 1;
+        cleanedBytes[27] = 0;
+        
+        const currentTotalSectors = cleanedBytes[19] | (cleanedBytes[20] << 8);
+        if (currentTotalSectors === 0 || currentTotalSectors > 820) {
+          const standardSingleSidedSectors = bestSpt * 80;
+          cleanedBytes[19] = standardSingleSidedSectors & 0xFF;
+          cleanedBytes[20] = (standardSingleSidedSectors >> 8) & 0xFF;
+        }
+      }
+      
+      return {
+        bytes: cleanedBytes,
+        wasDeinterleaved: true,
+        isFallback: true
+      };
+    }
+  }
+
+  return { bytes: diskBytes, wasDeinterleaved: false, isFallback: false };
+}
+
 // MSA Image compression/decompression
 export function decompressMSA(msaBytes: Uint8Array): Uint8Array {
   const sectorsPerTrack = (msaBytes[2] << 8) | msaBytes[3];
@@ -307,14 +1163,21 @@ export function decompressMSA(msaBytes: Uint8Array): Uint8Array {
   let srcPtr = 10; 
   let destPtr = 0;
 
+  let outOfData = false;
   for (let track = startTrack; track <= endTrack; track++) {
     for (let side = 0; side < sides; side++) {
-      if (srcPtr + 2 > msaBytes.length) throw new Error("Unexpected EOF reading track header");
+      if (srcPtr + 2 > msaBytes.length) {
+        outOfData = true;
+        break;
+      }
       
       const trackLen = (msaBytes[srcPtr] << 8) | msaBytes[srcPtr + 1];
       srcPtr += 2;
 
-      if (srcPtr + trackLen > msaBytes.length) throw new Error("Unexpected EOF reading track data");
+      if (srcPtr + trackLen > msaBytes.length) {
+        outOfData = true;
+        break;
+      }
 
       if (trackLen === bytesPerTrack) {
         uncompressedDisk.set(msaBytes.subarray(srcPtr, srcPtr + trackLen), destPtr);
@@ -327,7 +1190,10 @@ export function decompressMSA(msaBytes: Uint8Array): Uint8Array {
         while (srcPtr < endTrackPtr) {
           const byte = msaBytes[srcPtr++];
           if (byte === 0xE5) { 
-            if (srcPtr + 3 > endTrackPtr) throw new Error("Malformed RLE data segment");
+            if (srcPtr + 3 > endTrackPtr) {
+              outOfData = true;
+              break;
+            }
             
             const dataByte = msaBytes[srcPtr++];
             const count = (msaBytes[srcPtr] << 8) | msaBytes[srcPtr + 1];
@@ -345,8 +1211,9 @@ export function decompressMSA(msaBytes: Uint8Array): Uint8Array {
         destPtr = trackDestStart + bytesPerTrack;
       }
     }
+    if (outOfData) break;
   }
-  return uncompressedDisk;
+  return uncompressedDisk.slice(0, destPtr);
 }
 
 export function decompressRLE(sourceBytes: Uint8Array): Uint8Array {
@@ -2636,4 +3503,118 @@ export function decompressAutomation(packed: Uint8Array, offset?: number): Uint8
   } catch (err) {
     return null;
   }
+}
+
+export function decompressThunderV1(bytes: Uint8Array, offset?: number): Uint8Array | null {
+  if (!bytes || bytes.length < 12) return null;
+
+  let atomOffset = -1;
+  if (offset !== undefined) {
+    if (offset + 12 <= bytes.length &&
+        bytes[offset] === 0x41 && bytes[offset+1] === 0x54 && bytes[offset+2] === 0x4F && bytes[offset+3] === 0x4D) {
+      atomOffset = offset;
+    }
+  } else {
+    // Scan for ATOM header
+    const limit = Math.min(bytes.length - 12, 10000);
+    for (let i = 0; i < limit; i++) {
+      if (bytes[i] === 0x41 && bytes[i+1] === 0x54 && bytes[i+2] === 0x4F && bytes[i+3] === 0x4D) {
+        atomOffset = i;
+        break;
+      }
+    }
+  }
+
+  if (atomOffset === -1) return null;
+
+  try {
+    const uncompressedLength = readUint32BE(bytes, atomOffset + 4);
+    const packedLength = readUint32BE(bytes, atomOffset + 8);
+
+    let a2 = atomOffset + 12;
+    let packedEnd = a2 + packedLength;
+
+    if (packedEnd > bytes.length || packedLength > 16777216) {
+      packedEnd = bytes.length;
+    }
+
+    if (uncompressedLength <= 0 || uncompressedLength > 16777216) {
+      return null;
+    }
+
+    const dest = new Uint8Array(uncompressedLength);
+    let a4 = 0;
+    let d1 = 0;
+
+    while (a2 < packedEnd) {
+      if (a4 >= uncompressedLength) break;
+      if (a2 + 1 >= bytes.length) break;
+
+      let d4 = (bytes[a2] << 8) | bytes[a2 + 1];
+      a2 += 2;
+
+      let bit14 = (d4 >> 14) & 1;
+      let bit15 = (d4 >> 15) & 1;
+
+      if (bit14 === 0) {
+        if (bit15 === 1) {
+          d4 &= 0x7FFF;
+          if (a2 >= bytes.length) break;
+          d1 = bytes[a2++];
+        }
+        d4 += 0x2000;
+        while (true) {
+          let carry = d4 & 1;
+          d4 >>= 1;
+          if (d4 === 0) break;
+
+          if (a4 >= dest.length) break;
+
+          if (carry) {
+            dest[a4++] = d1;
+          } else {
+            if (a2 >= bytes.length) break;
+            dest[a4++] = bytes[a2++];
+          }
+        }
+      } else if (bit15 === 0) {
+        d4 &= 0xBFFF;
+        if (a2 >= bytes.length) break;
+        let d2 = bytes[a2++];
+
+        let count = d4 + 1;
+        for (let i = 0; i < count; i++) {
+          if (a4 >= dest.length) break;
+          dest[a4++] = d2;
+        }
+      } else {
+        d4 &= 0x3FFF;
+        if (a2 >= bytes.length) break;
+        let next_byte = bytes[a2++];
+
+        let length = (d4 >> 8) + 1;
+        let offsetVal = ((d4 & 0xFF) << 8) | next_byte;
+        let match_ptr = a4 - offsetVal;
+
+        if (match_ptr < 0) {
+          if (a4 >= uncompressedLength) break;
+          return null;
+        }
+
+        for (let i = 0; i < length; i++) {
+          if (a4 >= dest.length) break;
+          dest[a4] = dest[match_ptr];
+          a4++;
+          match_ptr++;
+        }
+      }
+    }
+
+    if (a4 > 0) {
+      return dest.subarray(0, a4);
+    }
+  } catch (err) {
+    return null;
+  }
+  return null;
 }

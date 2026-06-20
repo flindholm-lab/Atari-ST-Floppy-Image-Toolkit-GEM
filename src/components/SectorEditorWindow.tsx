@@ -140,6 +140,12 @@ export default function SectorEditorWindow({
           </div>
         )}
 
+        {geometry?.isFallback && (
+          <div className="bg-red-50 text-red-900 border-2 border-red-400 p-2 text-gem-small text-center font-bold uppercase animate-pulse">
+            ⚠️ FALLBACK ACTIVE: NON-COMPLIANT OR FAKED DOUBLE-SIDED LAYOUT SCAN-CORRECTED TO PIT-REALIGNED SINGLE-SIDED STORAGE
+          </div>
+        )}
+
         {/* TOP SELECTOR BAR */}
         <div className="flex items-center justify-between border-b border-black pb-2 flex-wrap gap-2">
           <div className="flex items-center gap-1">
